@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "delta-harmonica-player"
+version = "0.1.0"
+description = "Parse numbered harmonica scores into timed keyboard and mouse actions."
+readme = "README.md"
+requires-python = ">=3.10"
+
+[tool.setuptools.packages.find]
+include = ["harmonica_player*"]
