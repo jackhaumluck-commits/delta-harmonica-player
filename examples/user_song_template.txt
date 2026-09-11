@@ -1,0 +1,11 @@
+# 可以复制并修改这份 UTF-8 文本曲谱
+bpm 100
+title 用户曲谱示例
+
+1 0.5 normal
+2 0.5 normal
+3 0.5 normal
+4 0.5 normal
+5 1 normal
+0 0.5 rest
+5 1 semitone

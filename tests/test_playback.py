@@ -1,7 +1,10 @@
+from contextlib import redirect_stdout
+from io import StringIO
 import threading
 import unittest
 
 from harmonica_player.playback import (
+    ConsolePreviewOutput,
     PauseToggleResult,
     PlaybackResult,
     PreviewController,
@@ -118,6 +121,27 @@ class PlaybackTests(unittest.TestCase):
                 ("result", PlaybackResult.COMPLETED),
             ],
         )
+
+    def test_console_output_shows_progress_and_configured_hotkeys(self) -> None:
+        stream = StringIO()
+        output = ConsolePreviewOutput(
+            total_events=4,
+            start_key="F5",
+            stop_key="F6",
+            pause_key="F7",
+        )
+
+        with redirect_stdout(stream):
+            output.event_started(2, NoteEvent("1", 1, "normal"), 0.5)
+            output.playback_paused()
+            output.playback_finished(PlaybackResult.COMPLETED)
+
+        message = stream.getvalue()
+        self.assertIn("2/4", message)
+        self.assertIn("已完成  25.0%", message)
+        self.assertIn("F5", message)
+        self.assertIn("F6", message)
+        self.assertIn("F7", message)
 
     def test_can_cancel_during_countdown(self) -> None:
         clock = FakeClock()
