@@ -109,6 +109,10 @@ python -X utf8 -m harmonica_player --input-test-window
 python -X utf8 -m harmonica_player --song modifier_exercise --timed --real-input
 ```
 
+真实输入模式需要管理员权限。请右键 PowerShell 或 Windows Terminal，选择
+“以管理员身份运行”，再执行上面的命令；如果权限不足，程序会在等待 F8 前
+直接给出操作提示。普通预览和测试窗口本身不要求管理员权限。
+
 把鼠标移到测试窗口内，单击窗口使其位于最前方，然后按 `F8`。程序会锁定这个窗口，倒计时后发送键鼠输入。测试窗口应依次记录普通、左键降调、中键半音和右键升调事件。
 
 - 鼠标修饰键会先按下，键盘音符随后按下。
@@ -116,7 +120,7 @@ python -X utf8 -m harmonica_player --song modifier_exercise --timed --real-input
 - 按 `F10` 会立即释放当前输入；继续时重新按下并演奏剩余时长。
 - 按 `F9`、按 `Ctrl+C`、发生异常或切换前台窗口都会释放全部输入。
 
-真实输入使用 Windows `SendInput`。如果目标程序的权限级别高于播放器，Windows 可能会阻止输入；测试时让两个程序保持相同权限级别，不要无必要地使用管理员权限。
+真实输入使用 Windows `SendInput`。如果目标程序的权限级别高于播放器，Windows 可能会阻止输入；真实输入模式因此会预先检查管理员权限，但普通预览仍应使用普通权限运行。
 
 底层实现参考微软官方文档：[SendInput](https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-sendinput)、[INPUT](https://learn.microsoft.com/windows/win32/api/winuser/ns-winuser-input) 和 [GetForegroundWindow](https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-getforegroundwindow)。
 

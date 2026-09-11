@@ -40,6 +40,21 @@ _KEY_SCAN_CODES = {
 }
 
 
+def is_running_as_administrator(
+    *, check: Callable[[], int] | None = None
+) -> bool:
+    """Return whether this process has an elevated Windows token."""
+
+    if check is None:
+        if sys.platform != "win32":
+            return False
+        shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+        shell32.IsUserAnAdmin.argtypes = ()
+        shell32.IsUserAnAdmin.restype = wintypes.BOOL
+        check = shell32.IsUserAnAdmin
+    return bool(check())
+
+
 class _MOUSEINPUT(ctypes.Structure):
     _fields_ = [
         ("dx", wintypes.LONG),
