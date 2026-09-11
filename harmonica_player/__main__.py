@@ -37,6 +37,18 @@ def main() -> int:
         help="将 .song 或 .txt 曲谱导入用户曲库并退出",
     )
     parser.add_argument(
+        "--import-midi",
+        type=Path,
+        metavar="PATH",
+        help="将单旋律 .mid 或 .midi 文件转换并导入用户曲库",
+    )
+    parser.add_argument(
+        "--midi-track",
+        type=_non_negative_integer,
+        metavar="INDEX",
+        help="MIDI 中存在多个音符轨道时，指定要转换的轨道编号",
+    )
+    parser.add_argument(
         "--timed",
         action="store_true",
         help="按 BPM 计时预演，使用 F8/F9/F10 控制（仅 Windows）",
@@ -87,6 +99,8 @@ def main() -> int:
             or args.song is not None
             or args.list_songs
             or args.import_song is not None
+            or args.import_midi is not None
+            or args.midi_track is not None
             or args.timed
             or args.real_input
         ):
@@ -100,6 +114,12 @@ def main() -> int:
 
     if args.real_input and not args.timed:
         parser.error("--real-input 必须和 --timed 一起使用")
+
+    if args.midi_track is not None and args.import_midi is None:
+        parser.error("--midi-track 必须和 --import-midi 一起使用")
+
+    if args.import_song is not None and args.import_midi is not None:
+        parser.error("--import-song 和 --import-midi 只能选择一种")
 
     if args.import_song is not None:
         if (
@@ -116,6 +136,30 @@ def main() -> int:
             parser.error(f"无法导入曲谱：{error}")
         print(
             f"已导入用户曲目：{imported.display_name} "
+            f"({imported.path.name})"
+        )
+        return 0
+
+    if args.import_midi is not None:
+        if (
+            args.score is not None
+            or args.song is not None
+            or args.list_songs
+            or args.timed
+            or args.real_input
+        ):
+            parser.error("--import-midi 不能和曲谱或播放选项同时使用")
+        from .midi_import import MidiImportError, import_midi
+
+        try:
+            imported = import_midi(
+                args.import_midi,
+                track_index=args.midi_track,
+            )
+        except (OSError, SongFormatError, SongImportError, MidiImportError) as error:
+            parser.error(f"无法导入 MIDI：{error}")
+        print(
+            f"已将 MIDI 转换为用户曲目：{imported.display_name} "
             f"({imported.path.name})"
         )
         return 0

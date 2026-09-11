@@ -102,9 +102,26 @@ def import_song(
         text = source_path.read_text(encoding="utf-8")
     except UnicodeError as error:
         raise SongImportError("曲谱必须使用 UTF-8 编码") from error
+    return save_user_song(
+        text,
+        source_path.stem,
+        bundled_directory=bundled_directory,
+        user_directory=user_directory,
+    )
+
+
+def save_user_song(
+    text: str,
+    name: str,
+    *,
+    bundled_directory: Path = DEFAULT_SONG_DIRECTORY,
+    user_directory: Path = DEFAULT_USER_SONG_DIRECTORY,
+) -> SongSummary:
+    """Validate and store score text in the user song library."""
+
     song = parse_song(text)
-    destination = user_directory / f"{source_path.stem}.song"
-    imported_aliases = {source_path.stem.casefold()}
+    destination = user_directory / f"{name}.song"
+    imported_aliases = {name.casefold()}
     if song.title is not None:
         imported_aliases.add(song.title.casefold())
 

@@ -1,6 +1,6 @@
 # 三角洲口琴自动演奏器（学习项目）
 
-这是一个用 Python 编写的口琴曲谱播放器。当前版本是 v0.7.0，可以导入和管理用户的文本曲谱，计算每个音符需要使用的键盘按键、鼠标修饰键和持续时间，并支持曲目选择、播放进度、自定义功能键、终端预览以及显式开启的 Windows 键鼠输出。
+这是一个用 Python 编写的口琴曲谱播放器。当前版本是 v0.8.0，可以把单旋律 MIDI 转换成可编辑的文本曲谱，导入和管理用户曲谱，计算每个音符需要使用的键盘按键、鼠标修饰键和持续时间，并支持曲目选择、播放进度、自定义功能键、终端预览以及显式开启的 Windows 键鼠输出。
 
 > 默认模式不会发送真实输入。只有使用 `--real-input` 才会向当前前台窗口发送 Windows 键鼠事件。游戏对第三方自动化程序可能有处罚，请在用于游戏前确认当时有效的官方规则并自行评估账号风险。本项目不会读取、修改或注入游戏进程，也不会实现反作弊绕过。
 
@@ -10,6 +10,7 @@
 - 支持普通、降调、半音和升调。
 - 根据 BPM（每分钟拍数）计算按键持续时间。
 - 导入 `.song` 或 `.txt` 曲谱并加入用户曲库。
+- 把单旋律 `.mid` 或 `.midi` 文件转换成 `.song` 曲谱。
 - 使用文件名或中文标题选择内置曲目和用户曲目。
 - 默认使用 F8 开始、F9 紧急停止、F10 暂停或继续播放，并允许更换功能键。
 - 在终端显示当前事件数和播放百分比。
@@ -55,7 +56,13 @@ title 我的曲子
 
 ## 运行
 
-需要 Python 3.10 或更高版本。在项目目录中执行：
+需要 Python 3.10 或更高版本。首次使用或依赖发生变化时，在项目目录中安装项目：
+
+```powershell
+python -m pip install -e .
+```
+
+之后可以执行下面的命令。
 
 查看内置曲目和用户曲目：
 
@@ -98,6 +105,37 @@ python -X utf8 -m harmonica_player --song "我的曲子"
 ```
 
 用户曲谱默认不会被 Git 提交。文件名或标题与现有曲目冲突时，程序会拒绝导入，避免选择到错误的歌曲。
+
+### 导入 MIDI
+
+v0.8 可以把单旋律 MIDI 转换成可编辑的 `.song` 文件并加入用户曲库：
+
+```powershell
+python -X utf8 -m harmonica_player --import-midi "D:\Music\melody.mid"
+```
+
+如果暂时没有 MIDI 文件，可以先生成项目附带的测试示例：
+
+```powershell
+python -X utf8 examples/create_midi_example.py
+python -X utf8 -m harmonica_player --import-midi examples/generated_midi_scale.mid
+```
+
+转换后的文件会保存在 `songs` 文件夹，可以先打开检查，也可以直接预览：
+
+```powershell
+python -X utf8 -m harmonica_player --song generated_midi_scale
+```
+
+程序会自动选择唯一的有音符轨道。如果 MIDI 中有多个有音符轨道，错误信息会列出轨道编号；选择其中一个重新导入：
+
+```powershell
+python -X utf8 -m harmonica_player --import-midi "D:\Music\multi-track.mid" --midi-track 1
+```
+
+默认音高映射以 MIDI 中央 C（编号 60）作为 `1 normal`：低一个八度使用 `down`，高一个八度使用 `up`，中央八度的升半音使用 `semitone`。首版只支持恒定 BPM、一次演奏一个音符的单旋律，不支持和弦、播放中变速、延音踏板或音域外音符；遇到这些情况会停止导入并说明原因，不会生成不可靠的曲谱。
+
+MIDI 解析使用 [Mido](https://mido.readthedocs.io/en/stable/)，项目只需要它的文件读取能力，不需要实时 MIDI 端口后端。
 
 ### 计时播放和自定义热键
 
@@ -188,8 +226,7 @@ python -m unittest discover -s tests -v
 
 ## 计划
 
-1. v0.8：把 MIDI 文件转换为可人工修改的 `.song` 曲谱。
-2. v0.9：制作包含曲库、导入、权限状态和播放控制的桌面界面。
-3. v1.0：打包 Windows 可执行文件，并通过 GitHub Releases 发布。
+1. v0.9：制作包含曲库、导入、权限状态和播放控制的桌面界面。
+2. v1.0：打包 Windows 可执行文件，并通过 GitHub Releases 发布。
 
 不会加入运行时速度倍率、从指定事件开始或循环播放；BPM 继续作为曲谱本身的节奏信息保留。
