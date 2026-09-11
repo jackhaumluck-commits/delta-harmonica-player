@@ -11,7 +11,7 @@ from .song import SongFormatError, load_song
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="预览口琴曲谱的按键动作")
+    parser = argparse.ArgumentParser(description="预览或播放口琴曲谱的按键动作")
     parser.add_argument("score", type=Path, nargs="?", help="曲谱文件路径")
     parser.add_argument(
         "--song",
@@ -29,6 +29,16 @@ def main() -> int:
         help="按 BPM 计时预演，使用 F8/F9/F10 控制（仅 Windows）",
     )
     parser.add_argument(
+        "--real-input",
+        action="store_true",
+        help="实际发送 Windows 键鼠输入，必须和 --timed 一起使用",
+    )
+    parser.add_argument(
+        "--input-test-window",
+        action="store_true",
+        help="打开独立的键鼠输入测试窗口并退出",
+    )
+    parser.add_argument(
         "--countdown",
         type=_non_negative_integer,
         default=3,
@@ -36,6 +46,25 @@ def main() -> int:
         help="计时预演开始前的倒计时秒数（默认：3）",
     )
     args = parser.parse_args()
+
+    if args.input_test_window:
+        if (
+            args.score is not None
+            or args.song is not None
+            or args.list_songs
+            or args.timed
+            or args.real_input
+        ):
+            parser.error("--input-test-window 不能和曲谱或播放选项同时使用")
+        from .input_test_window import run_input_test_window
+
+        try:
+            return run_input_test_window()
+        except RuntimeError as error:
+            parser.error(str(error))
+
+    if args.real_input and not args.timed:
+        parser.error("--real-input 必须和 --timed 一起使用")
 
     if args.list_songs:
         if args.score is not None or args.song is not None:
@@ -74,7 +103,11 @@ def main() -> int:
         from .hotkeys import run_hotkey_preview
 
         try:
-            return run_hotkey_preview(song, countdown_seconds=args.countdown)
+            return run_hotkey_preview(
+                song,
+                countdown_seconds=args.countdown,
+                real_input=args.real_input,
+            )
         except OSError as error:
             parser.error(f"无法注册全局热键：{error}")
         except RuntimeError as error:
