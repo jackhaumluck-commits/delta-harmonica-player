@@ -2,6 +2,7 @@ import threading
 import unittest
 
 from harmonica_player.playback import (
+    PauseToggleResult,
     PlaybackResult,
     PreviewController,
     play_song,
@@ -40,6 +41,8 @@ class RecordingOutput:
     def __init__(self) -> None:
         self.records: list[tuple[object, ...]] = []
         self.event_started_signal = threading.Event()
+        self.paused_signal = threading.Event()
+        self.resumed_signal = threading.Event()
 
     def countdown(self, seconds: int) -> None:
         self.records.append(("countdown", seconds))
@@ -54,6 +57,14 @@ class RecordingOutput:
         self, index: int, event: NoteEvent, *, cancelled: bool
     ) -> None:
         self.records.append(("finish", index, event.note, cancelled))
+
+    def playback_paused(self) -> None:
+        self.records.append(("paused",))
+        self.paused_signal.set()
+
+    def playback_resumed(self) -> None:
+        self.records.append(("resumed",))
+        self.resumed_signal.set()
 
     def playback_finished(self, result: PlaybackResult) -> None:
         self.records.append(("result", result))
@@ -154,6 +165,57 @@ class PlaybackTests(unittest.TestCase):
         self.assertTrue(controller.start())
         self.assertTrue(output.event_started_signal.wait(1))
         self.assertFalse(controller.start())
+        self.assertTrue(controller.stop())
+        controller.join(1)
+
+        self.assertFalse(controller.is_playing)
+        self.assertIn(("finish", 1, "1", True), output.records)
+        self.assertIn(("result", PlaybackResult.CANCELLED), output.records)
+
+    def test_controller_freezes_time_while_paused_and_then_resumes(self) -> None:
+        short_song = Song(
+            bpm=60,
+            events=(NoteEvent("1", 0.5, "normal"),),
+        )
+        output = RecordingOutput()
+        controller = PreviewController(
+            short_song,
+            countdown_seconds=0,
+            output_factory=lambda: output,
+        )
+
+        self.assertTrue(controller.start())
+        self.assertTrue(output.event_started_signal.wait(1))
+        self.assertIs(controller.toggle_pause(), PauseToggleResult.PAUSED)
+        self.assertTrue(output.paused_signal.wait(1))
+
+        threading.Event().wait(0.3)
+        self.assertTrue(controller.is_playing)
+        self.assertTrue(controller.is_paused)
+
+        self.assertIs(controller.toggle_pause(), PauseToggleResult.RESUMED)
+        self.assertTrue(output.resumed_signal.wait(1))
+        controller.join(2)
+
+        self.assertFalse(controller.is_playing)
+        self.assertIn(("result", PlaybackResult.COMPLETED), output.records)
+
+    def test_controller_can_stop_while_paused(self) -> None:
+        long_song = Song(
+            bpm=60,
+            events=(NoteEvent("1", 60, "normal"),),
+        )
+        output = RecordingOutput()
+        controller = PreviewController(
+            long_song,
+            countdown_seconds=0,
+            output_factory=lambda: output,
+        )
+
+        self.assertTrue(controller.start())
+        self.assertTrue(output.event_started_signal.wait(1))
+        self.assertIs(controller.toggle_pause(), PauseToggleResult.PAUSED)
+        self.assertTrue(output.paused_signal.wait(1))
         self.assertTrue(controller.stop())
         controller.join(1)
 

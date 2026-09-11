@@ -9,37 +9,41 @@ from ctypes import wintypes
 from enum import Enum
 from time import sleep
 
-from .playback import ConsolePreviewOutput, PreviewController
+from .playback import ConsolePreviewOutput, PauseToggleResult, PreviewController
 from .song import Song
 
 
 class Hotkey(Enum):
     START = "start"
     STOP = "stop"
+    PAUSE_TOGGLE = "pause_toggle"
 
 
 _START_ID = 1
 _STOP_ID = 2
+_PAUSE_ID = 3
 _MOD_NOREPEAT = 0x4000
 _VK_F8 = 0x77
 _VK_F9 = 0x78
+_VK_F10 = 0x79
 _WM_HOTKEY = 0x0312
 _PM_REMOVE = 0x0001
 
 
 class WindowsHotkeyListener:
-    """Register F8 and F9 and yield events from the Windows message loop."""
+    """Register playback hotkeys and yield events from the Windows message loop."""
 
     def __init__(self) -> None:
         self._registered_ids: list[int] = []
 
     def __enter__(self) -> WindowsHotkeyListener:
         if sys.platform != "win32":
-            raise RuntimeError("全局 F8/F9 热键目前只支持 Windows")
+            raise RuntimeError("全局 F8/F9/F10 热键目前只支持 Windows")
 
         try:
             self._register(_START_ID, _VK_F8)
             self._register(_STOP_ID, _VK_F9)
+            self._register(_PAUSE_ID, _VK_F10)
         except BaseException:
             self._unregister_all()
             raise
@@ -68,6 +72,8 @@ class WindowsHotkeyListener:
                 yield Hotkey.START
             elif message.wParam == _STOP_ID:
                 yield Hotkey.STOP
+            elif message.wParam == _PAUSE_ID:
+                yield Hotkey.PAUSE_TOGGLE
 
     def _register(self, hotkey_id: int, virtual_key: int) -> None:
         user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -85,7 +91,7 @@ class WindowsHotkeyListener:
 
 
 def run_hotkey_preview(song: Song, *, countdown_seconds: int = 3) -> int:
-    """Wait for F8/F9 and run repeatable timed terminal previews."""
+    """Wait for global hotkeys and run repeatable timed terminal previews."""
 
     output = ConsolePreviewOutput()
     controller = PreviewController(
@@ -94,7 +100,10 @@ def run_hotkey_preview(song: Song, *, countdown_seconds: int = 3) -> int:
         output_factory=lambda: output,
     )
 
-    print("计时预演已就绪：F8 开始，F9 紧急停止，Ctrl+C 退出。", flush=True)
+    print(
+        "计时预演已就绪：F8 开始，F9 紧急停止，F10 暂停/继续，Ctrl+C 退出。",
+        flush=True,
+    )
     try:
         with WindowsHotkeyListener() as listener:
             for hotkey in listener.events():
@@ -104,10 +113,15 @@ def run_hotkey_preview(song: Song, *, countdown_seconds: int = 3) -> int:
                     else:
                         print("收到 F8，开始倒计时。", flush=True)
                         controller.start()
-                elif controller.stop():
-                    print("收到 F9，正在停止。", flush=True)
-                else:
-                    print("当前没有正在进行的预演。", flush=True)
+                elif hotkey is Hotkey.STOP:
+                    if controller.stop():
+                        print("收到 F9，正在停止。", flush=True)
+                    else:
+                        print("当前没有正在进行的预演。", flush=True)
+                elif (
+                    controller.toggle_pause() is PauseToggleResult.NOT_PLAYING
+                ):
+                    print("当前没有可以暂停的预演。", flush=True)
     except KeyboardInterrupt:
         print("\n正在退出……", flush=True)
     finally:
