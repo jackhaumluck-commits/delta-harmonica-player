@@ -100,7 +100,20 @@ def run_hotkey_preview(
 
     output = ConsolePreviewOutput()
     if real_input:
-        from .windows_input import WindowsInputOutput
+        if sys.platform != "win32":
+            raise RuntimeError("真实键鼠输入目前只支持 Windows")
+
+        from .windows_input import (
+            WindowsInputOutput,
+            is_running_as_administrator,
+        )
+
+        if not is_running_as_administrator():
+            raise RuntimeError(
+                "真实输入模式需要管理员权限。请关闭当前终端，右键 "
+                "PowerShell 或 Windows Terminal，选择“以管理员身份运行”，"
+                "然后重新执行命令。"
+            )
 
         output_factory = lambda: WindowsInputOutput(console=output)
     else:

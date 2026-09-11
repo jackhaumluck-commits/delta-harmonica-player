@@ -2,7 +2,11 @@ import unittest
 
 from harmonica_player.playback import ConsolePreviewOutput
 from harmonica_player.song import NoteEvent
-from harmonica_player.windows_input import WindowsInputOutput, WindowsInputSender
+from harmonica_player.windows_input import (
+    WindowsInputOutput,
+    WindowsInputSender,
+    is_running_as_administrator,
+)
 
 
 class FakeSender:
@@ -181,6 +185,14 @@ class WindowsInputSenderTests(unittest.TestCase):
             sender.key_down("A")
         with self.assertRaisesRegex(ValueError, "不支持的鼠标按键"):
             sender.mouse_down("side")
+
+
+class AdministratorCheckTests(unittest.TestCase):
+    def test_reports_elevated_process(self) -> None:
+        self.assertTrue(is_running_as_administrator(check=lambda: 1))
+
+    def test_reports_non_elevated_process(self) -> None:
+        self.assertFalse(is_running_as_administrator(check=lambda: 0))
 
 
 if __name__ == "__main__":
