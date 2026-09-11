@@ -5,7 +5,14 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from .library import SongSelectionError, SongSummary, list_songs, select_song_path
+from .library import (
+    SongImportError,
+    SongSelectionError,
+    SongSummary,
+    import_song,
+    list_songs,
+    select_song_path,
+)
 from .playback import describe_event
 from .song import SongFormatError, load_song
 
@@ -16,12 +23,18 @@ def main() -> int:
     parser.add_argument(
         "--song",
         metavar="NAME",
-        help="按名称选择内置曲目；使用 --list-songs 查看名称",
+        help="按文件名或标题选择曲库中的曲目；使用 --list-songs 查看名称",
     )
     parser.add_argument(
         "--list-songs",
         action="store_true",
-        help="列出内置曲目并退出",
+        help="列出内置曲目和用户曲目并退出",
+    )
+    parser.add_argument(
+        "--import-song",
+        type=Path,
+        metavar="PATH",
+        help="将 .song 或 .txt 曲谱导入用户曲库并退出",
     )
     parser.add_argument(
         "--timed",
@@ -45,6 +58,27 @@ def main() -> int:
         metavar="SECONDS",
         help="计时预演开始前的倒计时秒数（默认：3）",
     )
+    parser.add_argument(
+        "--start-key",
+        type=_function_key,
+        default="F8",
+        metavar="F1-F24",
+        help="开始播放快捷键（默认：F8）",
+    )
+    parser.add_argument(
+        "--stop-key",
+        type=_function_key,
+        default="F9",
+        metavar="F1-F24",
+        help="停止播放快捷键（默认：F9）",
+    )
+    parser.add_argument(
+        "--pause-key",
+        type=_function_key,
+        default="F10",
+        metavar="F1-F24",
+        help="暂停或继续快捷键（默认：F10）",
+    )
     args = parser.parse_args()
 
     if args.input_test_window:
@@ -52,6 +86,7 @@ def main() -> int:
             args.score is not None
             or args.song is not None
             or args.list_songs
+            or args.import_song is not None
             or args.timed
             or args.real_input
         ):
@@ -66,19 +101,51 @@ def main() -> int:
     if args.real_input and not args.timed:
         parser.error("--real-input 必须和 --timed 一起使用")
 
+    if args.import_song is not None:
+        if (
+            args.score is not None
+            or args.song is not None
+            or args.list_songs
+            or args.timed
+            or args.real_input
+        ):
+            parser.error("--import-song 不能和曲谱或播放选项同时使用")
+        try:
+            imported = import_song(args.import_song)
+        except (OSError, SongFormatError, SongImportError) as error:
+            parser.error(f"无法导入曲谱：{error}")
+        print(
+            f"已导入用户曲目：{imported.display_name} "
+            f"({imported.path.name})"
+        )
+        return 0
+
     if args.list_songs:
-        if args.score is not None or args.song is not None:
+        if args.score is not None or args.song is not None or args.timed:
             parser.error("--list-songs 不能和曲谱路径或 --song 同时使用")
         try:
             _print_song_list(list_songs())
         except (OSError, SongFormatError) as error:
-            parser.error(f"无法读取内置曲目：{error}")
+            parser.error(f"无法读取曲库：{error}")
         return 0
 
     if args.score is not None and args.song is not None:
         parser.error("曲谱路径和 --song 只能选择一种")
     if args.score is None and args.song is None:
-        parser.error("请提供曲谱路径，或使用 --song NAME 选择内置曲目")
+        parser.error("请提供曲谱路径，或使用 --song NAME 选择曲库中的曲目")
+
+    bindings = None
+    if args.timed:
+        from .hotkeys import HotkeyBindings
+
+        try:
+            bindings = HotkeyBindings(
+                start=args.start_key,
+                stop=args.stop_key,
+                pause=args.pause_key,
+            )
+        except ValueError as error:
+            parser.error(str(error))
 
     try:
         if args.score is not None:
@@ -107,6 +174,7 @@ def main() -> int:
                 song,
                 countdown_seconds=args.countdown,
                 real_input=args.real_input,
+                bindings=bindings,
             )
         except OSError as error:
             parser.error(f"无法注册全局热键：{error}")
@@ -133,15 +201,25 @@ def _non_negative_integer(value: str) -> int:
     return number
 
 
+def _function_key(value: str) -> str:
+    from .hotkeys import normalize_function_key
+
+    try:
+        return normalize_function_key(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error)) from error
+
+
 def _print_song_list(songs: tuple[SongSummary, ...]) -> None:
     if not songs:
-        print("没有找到内置曲目。")
+        print("曲库中没有找到曲目。")
         return
 
-    print("可用的内置曲目：")
+    print("可用曲目：")
     for song in songs:
         print(
-            f"  {song.name:<20} {song.display_name} | BPM {song.bpm:g}, "
+            f"  [{song.source.value}] {song.name:<20} "
+            f"{song.display_name} | BPM {song.bpm:g}, "
             f"{song.event_count} 个事件, {song.duration_seconds:.3f} 秒"
         )
 

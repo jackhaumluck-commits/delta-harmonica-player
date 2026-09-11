@@ -29,6 +29,12 @@ class ExampleScoreTests(unittest.TestCase):
         modifiers = {event.modifier for event in song.events if not event.is_rest}
         self.assertEqual(modifiers, {"normal", "down", "semitone", "up"})
 
+    def test_user_song_import_template_can_be_loaded(self) -> None:
+        song = load_song(EXAMPLES_DIRECTORY / "user_song_template.txt")
+
+        self.assertEqual(song.title, "用户曲谱示例")
+        self.assertGreater(len(song.events), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,6 +1,6 @@
 # 三角洲口琴自动演奏器（学习项目）
 
-这是一个用 Python 编写的口琴曲谱播放器。当前版本是 v0.6.0，可以读取带中文标题的数字曲谱，计算每个音符需要使用的键盘按键、鼠标修饰键和持续时间，并支持曲目选择、终端预览以及显式开启的 Windows 键鼠输出。
+这是一个用 Python 编写的口琴曲谱播放器。当前版本是 v0.7.0，可以导入和管理用户的文本曲谱，计算每个音符需要使用的键盘按键、鼠标修饰键和持续时间，并支持曲目选择、播放进度、自定义功能键、终端预览以及显式开启的 Windows 键鼠输出。
 
 > 默认模式不会发送真实输入。只有使用 `--real-input` 才会向当前前台窗口发送 Windows 键鼠事件。游戏对第三方自动化程序可能有处罚，请在用于游戏前确认当时有效的官方规则并自行评估账号风险。本项目不会读取、修改或注入游戏进程，也不会实现反作弊绕过。
 
@@ -9,8 +9,10 @@
 - 读取文本曲谱。
 - 支持普通、降调、半音和升调。
 - 根据 BPM（每分钟拍数）计算按键持续时间。
-- 使用文件名或中文标题选择内置曲目。
-- 使用 F8 开始、F9 紧急停止、F10 暂停或继续播放。
+- 导入 `.song` 或 `.txt` 曲谱并加入用户曲库。
+- 使用文件名或中文标题选择内置曲目和用户曲目。
+- 默认使用 F8 开始、F9 紧急停止、F10 暂停或继续播放，并允许更换功能键。
+- 在终端显示当前事件数和播放百分比。
 - 默认在终端中安全预览，也可以显式开启 Windows 真实输入。
 - 锁定 F8 启动时的前台窗口，切换窗口后自动停止并释放输入。
 
@@ -55,13 +57,13 @@ title 我的曲子
 
 需要 Python 3.10 或更高版本。在项目目录中执行：
 
-查看内置曲目：
+查看内置曲目和用户曲目：
 
 ```powershell
 python -X utf8 -m harmonica_player --list-songs
 ```
 
-按名称预览内置曲目：
+按名称预览曲库中的曲目：
 
 ```powershell
 python -X utf8 -m harmonica_player --song twinkle_twinkle
@@ -79,13 +81,33 @@ python -X utf8 -m harmonica_player --song "小星星（第一段）"
 python -X utf8 -m harmonica_player examples/demo.song
 ```
 
+### 导入自己的曲谱
+
+外部曲谱可以使用 `.song` 或 `.txt` 扩展名，内容必须符合本项目的曲谱格式并使用 UTF-8 编码。导入前程序会先检查格式：
+
+```powershell
+python -X utf8 -m harmonica_player --import-song examples/user_song_template.txt
+```
+
+上面的命令使用项目附带的导入示例；以后只需将路径换成自己的曲谱文件。
+
+导入成功后，曲谱会以 `.song` 文件保存在项目的 `songs` 文件夹中，并可以通过文件名或中文标题选择：
+
+```powershell
+python -X utf8 -m harmonica_player --song "我的曲子"
+```
+
+用户曲谱默认不会被 Git 提交。文件名或标题与现有曲目冲突时，程序会拒绝导入，避免选择到错误的歌曲。
+
+### 计时播放和自定义热键
+
 在 Windows 上启动安全的计时预演：
 
 ```powershell
 python -X utf8 -m harmonica_player examples/demo.song --timed
 ```
 
-程序启动后会一直等待：按 `F8` 后倒计时 3 秒并开始预演，按 `F10` 暂停或继续，按 `F9` 可在倒计时、播放或暂停中立即停止；完成或停止后可以再次按 `F8`。按 `Ctrl+C` 退出程序。这个模式只打印动作，不发送真实输入。
+程序启动后会一直等待：按 `F8` 后倒计时 3 秒并开始预演，按 `F10` 暂停或继续，按 `F9` 可在倒计时、播放或暂停中立即停止；完成或停止后可以再次按 `F8`。播放时会显示当前事件数和完成百分比。按 `Ctrl+C` 退出程序。这个模式只打印动作，不发送真实输入。
 
 可以用 `--countdown` 修改倒计时，例如：
 
@@ -94,6 +116,12 @@ python -X utf8 -m harmonica_player examples/demo.song --timed --countdown 5
 ```
 
 如果 F8、F9 或 F10 已被其他软件占用，程序会报告无法注册全局热键。
+
+开始、停止和暂停键可以分别更换为 F1 到 F24，三个按键不能重复。例如：
+
+```powershell
+python -X utf8 -m harmonica_player --song twinkle_twinkle --timed --start-key F5 --stop-key F6 --pause-key F7
+```
 
 ### 在测试窗口验证真实输入
 
@@ -156,9 +184,12 @@ python -X utf8 -m harmonica_player --song modifier_exercise
 python -m unittest discover -s tests -v
 ```
 
+每次向 GitHub 推送 `main` 或创建 PR 时，GitHub Actions 也会在 Python 3.10 和 3.13 上自动运行这些测试。
+
 ## 计划
 
-1. 在游戏外测试窗口完成 Windows 键鼠输出验收。
-2. 根据更多真实曲谱的体验调整曲谱格式。
-3. 增加速度调整、片段循环和自定义热键。
-4. 制作桌面界面，并打包成方便运行的 Windows 程序。
+1. v0.8：把 MIDI 文件转换为可人工修改的 `.song` 曲谱。
+2. v0.9：制作包含曲库、导入、权限状态和播放控制的桌面界面。
+3. v1.0：打包 Windows 可执行文件，并通过 GitHub Releases 发布。
+
+不会加入运行时速度倍率、从指定事件开始或循环播放；BPM 继续作为曲谱本身的节奏信息保留。

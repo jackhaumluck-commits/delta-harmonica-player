@@ -7,3 +7,5 @@ dist/
 build/
 *.egg-info/
 .idea/
+songs/*.song
+!songs/.gitkeep

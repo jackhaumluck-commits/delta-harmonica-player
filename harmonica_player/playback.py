@@ -50,12 +50,32 @@ class PlaybackOutput(Protocol):
 class ConsolePreviewOutput:
     """Print the actions that a future real-input output would perform."""
 
+    def __init__(
+        self,
+        *,
+        total_events: int | None = None,
+        start_key: str = "F8",
+        stop_key: str = "F9",
+        pause_key: str = "F10",
+    ) -> None:
+        self._total_events = total_events
+        self._start_key = start_key
+        self._stop_key = stop_key
+        self._pause_key = pause_key
+
     def countdown(self, seconds: int) -> None:
         print(f"{seconds}...", flush=True)
 
     def event_started(self, index: int, event: NoteEvent, duration: float) -> None:
+        progress = f"{index:>3}."
+        if self._total_events is not None:
+            percentage = (index - 1) / self._total_events
+            progress = (
+                f"[{index:>{len(str(self._total_events))}}/{self._total_events} "
+                f"已完成 {percentage:>6.1%}]"
+            )
         print(
-            f"{index:>3}. 开始 {describe_event(event):<28} {duration:.3f}s",
+            f"{progress} 开始 {describe_event(event):<28} {duration:.3f}s",
             flush=True,
         )
 
@@ -68,16 +88,20 @@ class ConsolePreviewOutput:
         print(f"     释放 {describe_event(event)}{suffix}", flush=True)
 
     def playback_paused(self) -> None:
-        print("预演已暂停，按 F10 继续，按 F9 停止。", flush=True)
+        print(
+            f"预演已暂停，按 {self._pause_key} 继续，"
+            f"按 {self._stop_key} 停止。",
+            flush=True,
+        )
 
     def playback_resumed(self) -> None:
         print("预演继续。", flush=True)
 
     def playback_finished(self, result: PlaybackResult) -> None:
         if result is PlaybackResult.COMPLETED:
-            message = "预演完成，等待 F8 再次开始。"
+            message = f"预演完成，等待 {self._start_key} 再次开始。"
         else:
-            message = "预演已停止，等待 F8 再次开始。"
+            message = f"预演已停止，等待 {self._start_key} 再次开始。"
         print(message, flush=True)
 
     def playback_failed(self, error: Exception) -> None:
