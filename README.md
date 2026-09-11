@@ -1,8 +1,8 @@
 # 三角洲口琴自动演奏器（学习项目）
 
-这是一个用 Python 编写的口琴曲谱播放器。当前版本是 v0.5.0，可以读取带中文标题的数字曲谱，计算每个音符需要使用的键盘按键、鼠标修饰键和持续时间，并支持曲目选择、静态预览和按 BPM 计时的终端预演。
+这是一个用 Python 编写的口琴曲谱播放器。当前版本是 v0.6.0，可以读取带中文标题的数字曲谱，计算每个音符需要使用的键盘按键、鼠标修饰键和持续时间，并支持曲目选择、终端预览以及显式开启的 Windows 键鼠输出。
 
-> 当前版本不会向游戏发送按键，也不会修改、读取或注入游戏进程。游戏对第三方自动化程序可能有处罚，请在添加真实输入功能前确认官方规则并自行评估账号风险。本项目不会实现反作弊绕过。
+> 默认模式不会发送真实输入。只有使用 `--real-input` 才会向当前前台窗口发送 Windows 键鼠事件。游戏对第三方自动化程序可能有处罚，请在用于游戏前确认当时有效的官方规则并自行评估账号风险。本项目不会读取、修改或注入游戏进程，也不会实现反作弊绕过。
 
 ## 当前目标
 
@@ -10,8 +10,9 @@
 - 支持普通、降调、半音和升调。
 - 根据 BPM（每分钟拍数）计算按键持续时间。
 - 使用文件名或中文标题选择内置曲目。
-- 使用 F8 开始、F9 紧急停止、F10 暂停或继续计时预演。
-- 在终端中安全预览演奏动作，不发送真实输入。
+- 使用 F8 开始、F9 紧急停止、F10 暂停或继续播放。
+- 默认在终端中安全预览，也可以显式开启 Windows 真实输入。
+- 锁定 F8 启动时的前台窗口，切换窗口后自动停止并释放输入。
 
 ## 键位规则
 
@@ -78,13 +79,13 @@ python -X utf8 -m harmonica_player --song "小星星（第一段）"
 python -X utf8 -m harmonica_player examples/demo.song
 ```
 
-在 Windows 上启动计时预演：
+在 Windows 上启动安全的计时预演：
 
 ```powershell
 python -X utf8 -m harmonica_player examples/demo.song --timed
 ```
 
-程序启动后会一直等待：按 `F8` 后倒计时 3 秒并开始预演，按 `F10` 暂停或继续，按 `F9` 可在倒计时、播放或暂停中立即停止；完成或停止后可以再次按 `F8`。按 `Ctrl+C` 退出程序。
+程序启动后会一直等待：按 `F8` 后倒计时 3 秒并开始预演，按 `F10` 暂停或继续，按 `F9` 可在倒计时、播放或暂停中立即停止；完成或停止后可以再次按 `F8`。按 `Ctrl+C` 退出程序。这个模式只打印动作，不发送真实输入。
 
 可以用 `--countdown` 修改倒计时，例如：
 
@@ -92,7 +93,32 @@ python -X utf8 -m harmonica_player examples/demo.song --timed
 python -X utf8 -m harmonica_player examples/demo.song --timed --countdown 5
 ```
 
-如果 F8、F9 或 F10 已被其他软件占用，程序会报告无法注册全局热键。当前计时模式只输出“开始”和“释放”等文字，**不会按下真实键盘或鼠标，也不会向游戏发送输入**。
+如果 F8、F9 或 F10 已被其他软件占用，程序会报告无法注册全局热键。
+
+### 在测试窗口验证真实输入
+
+第一次使用真实输入时，请先在游戏外测试。打开第一个 PowerShell，进入项目目录并运行：
+
+```powershell
+python -X utf8 -m harmonica_player --input-test-window
+```
+
+保持测试窗口打开，再打开第二个 PowerShell并运行：
+
+```powershell
+python -X utf8 -m harmonica_player --song modifier_exercise --timed --real-input
+```
+
+把鼠标移到测试窗口内，单击窗口使其位于最前方，然后按 `F8`。程序会锁定这个窗口，倒计时后发送键鼠输入。测试窗口应依次记录普通、左键降调、中键半音和右键升调事件。
+
+- 鼠标修饰键会先按下，键盘音符随后按下。
+- 音符结束时会先释放键盘，再释放鼠标。
+- 按 `F10` 会立即释放当前输入；继续时重新按下并演奏剩余时长。
+- 按 `F9`、按 `Ctrl+C`、发生异常或切换前台窗口都会释放全部输入。
+
+真实输入使用 Windows `SendInput`。如果目标程序的权限级别高于播放器，Windows 可能会阻止输入；测试时让两个程序保持相同权限级别，不要无必要地使用管理员权限。
+
+底层实现参考微软官方文档：[SendInput](https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-sendinput)、[INPUT](https://learn.microsoft.com/windows/win32/api/winuser/ns-winuser-input) 和 [GetForegroundWindow](https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-getforegroundwindow)。
 
 ### 第一首练习曲
 
@@ -128,7 +154,7 @@ python -m unittest discover -s tests -v
 
 ## 计划
 
-1. 根据更多真实曲谱的体验调整曲谱格式。
-2. 保持终端预览模式，增加可安全释放全部按键的 Windows 输入模块。
+1. 在游戏外测试窗口完成 Windows 键鼠输出验收。
+2. 根据更多真实曲谱的体验调整曲谱格式。
 3. 增加速度调整、片段循环和自定义热键。
 4. 制作桌面界面，并打包成方便运行的 Windows 程序。

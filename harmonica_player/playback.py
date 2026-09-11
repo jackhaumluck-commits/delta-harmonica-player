@@ -1,4 +1,4 @@
-"""Timed terminal preview that never sends keyboard or mouse input."""
+"""Timed playback with replaceable preview or real-input outputs."""
 
 from __future__ import annotations
 
@@ -21,8 +21,8 @@ class PauseToggleResult(Enum):
     NOT_PLAYING = "not_playing"
 
 
-class PreviewOutput(Protocol):
-    """Receive playback events without knowing how they are displayed."""
+class PlaybackOutput(Protocol):
+    """Receive playback events without knowing how they are performed."""
 
     def countdown(self, seconds: int) -> None: ...
 
@@ -39,6 +39,12 @@ class PreviewOutput(Protocol):
     def playback_resumed(self) -> None: ...
 
     def playback_finished(self, result: PlaybackResult) -> None: ...
+
+    def playback_failed(self, error: Exception) -> None: ...
+
+    def cancel_requested(self) -> bool: ...
+
+    def release_all(self) -> None: ...
 
 
 class ConsolePreviewOutput:
@@ -74,6 +80,15 @@ class ConsolePreviewOutput:
             message = "预演已停止，等待 F8 再次开始。"
         print(message, flush=True)
 
+    def playback_failed(self, error: Exception) -> None:
+        print(f"播放失败：{error}", flush=True)
+
+    def cancel_requested(self) -> bool:
+        return False
+
+    def release_all(self) -> None:
+        return
+
 
 def describe_event(event: NoteEvent) -> str:
     if event.is_rest:
@@ -86,20 +101,47 @@ def describe_event(event: NoteEvent) -> str:
 def play_song(
     song: Song,
     stop_event: Event,
-    output: PreviewOutput,
+    output: PlaybackOutput,
     *,
     countdown_seconds: int = 3,
     pause_event: Event | None = None,
     clock: Callable[[], float] = monotonic,
 ) -> PlaybackResult:
-    """Preview one song at its configured BPM, with prompt cancellation."""
+    """Play one song at its configured BPM, with prompt cancellation."""
 
     if countdown_seconds < 0:
         raise ValueError("倒计时不能小于零")
 
+    try:
+        return _play_song(
+            song,
+            stop_event,
+            output,
+            countdown_seconds=countdown_seconds,
+            pause_event=pause_event,
+            clock=clock,
+        )
+    except BaseException as error:
+        try:
+            output.release_all()
+        except BaseException as cleanup_error:
+            raise cleanup_error from error
+        raise
+
+
+def _play_song(
+    song: Song,
+    stop_event: Event,
+    output: PlaybackOutput,
+    *,
+    countdown_seconds: int,
+    pause_event: Event | None,
+    clock: Callable[[], float],
+) -> PlaybackResult:
+
     deadline = clock()
     for remaining in range(countdown_seconds, 0, -1):
-        if stop_event.is_set():
+        if _cancellation_requested(stop_event, output):
             return _finish(output, PlaybackResult.CANCELLED)
         output.countdown(remaining)
         deadline += 1.0
@@ -116,7 +158,7 @@ def play_song(
     # Fixed deadlines keep small scheduling delays from accumulating as drift.
     deadline = clock()
     for index, event in enumerate(song.events, start=1):
-        if stop_event.is_set():
+        if _cancellation_requested(stop_event, output):
             return _finish(output, PlaybackResult.CANCELLED)
 
         duration = event.duration_seconds(song.bpm)
@@ -143,10 +185,10 @@ def _wait_until(
     clock: Callable[[], float],
     *,
     pause_event: Event | None,
-    output: PreviewOutput,
+    output: PlaybackOutput,
 ) -> tuple[bool, float]:
     while True:
-        if stop_event.is_set():
+        if _cancellation_requested(stop_event, output):
             return True, deadline
 
         if pause_event is not None and pause_event.is_set():
@@ -155,7 +197,11 @@ def _wait_until(
             while pause_event.is_set():
                 if stop_event.wait(0.05):
                     return True, deadline
+                if output.cancel_requested():
+                    return True, deadline
             deadline += clock() - paused_at
+            if _cancellation_requested(stop_event, output):
+                return True, deadline
             output.playback_resumed()
 
         remaining = deadline - clock()
@@ -167,7 +213,12 @@ def _wait_until(
             return True, deadline
 
 
-def _finish(output: PreviewOutput, result: PlaybackResult) -> PlaybackResult:
+def _cancellation_requested(stop_event: Event, output: PlaybackOutput) -> bool:
+    return stop_event.is_set() or output.cancel_requested()
+
+
+def _finish(output: PlaybackOutput, result: PlaybackResult) -> PlaybackResult:
+    output.release_all()
     output.playback_finished(result)
     return result
 
@@ -180,7 +231,7 @@ class PreviewController:
         song: Song,
         *,
         countdown_seconds: int = 3,
-        output_factory: Callable[[], PreviewOutput] = ConsolePreviewOutput,
+        output_factory: Callable[[], PlaybackOutput] = ConsolePreviewOutput,
     ) -> None:
         self._song = song
         self._countdown_seconds = countdown_seconds
@@ -199,13 +250,16 @@ class PreviewController:
 
             stop_event = Event()
             pause_event = Event()
+            output = self._output_factory()
             thread = Thread(
-                target=play_song,
-                args=(self._song, stop_event, self._output_factory()),
-                kwargs={
-                    "countdown_seconds": self._countdown_seconds,
-                    "pause_event": pause_event,
-                },
+                target=_run_playback,
+                args=(
+                    self._song,
+                    stop_event,
+                    pause_event,
+                    output,
+                    self._countdown_seconds,
+                ),
                 name="harmonica-preview",
                 daemon=True,
             )
@@ -258,3 +312,22 @@ class PreviewController:
                 and self._pause_event is not None
                 and self._pause_event.is_set()
             )
+
+
+def _run_playback(
+    song: Song,
+    stop_event: Event,
+    pause_event: Event,
+    output: PlaybackOutput,
+    countdown_seconds: int,
+) -> None:
+    try:
+        play_song(
+            song,
+            stop_event,
+            output,
+            countdown_seconds=countdown_seconds,
+            pause_event=pause_event,
+        )
+    except Exception as error:
+        output.playback_failed(error)

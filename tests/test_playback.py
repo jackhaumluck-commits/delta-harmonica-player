@@ -43,6 +43,7 @@ class RecordingOutput:
         self.event_started_signal = threading.Event()
         self.paused_signal = threading.Event()
         self.resumed_signal = threading.Event()
+        self.release_calls = 0
 
     def countdown(self, seconds: int) -> None:
         self.records.append(("countdown", seconds))
@@ -69,6 +70,15 @@ class RecordingOutput:
     def playback_finished(self, result: PlaybackResult) -> None:
         self.records.append(("result", result))
 
+    def playback_failed(self, error: Exception) -> None:
+        self.records.append(("failed", str(error)))
+
+    def cancel_requested(self) -> bool:
+        return False
+
+    def release_all(self) -> None:
+        self.release_calls += 1
+
 
 class PlaybackTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -94,6 +104,7 @@ class PlaybackTests(unittest.TestCase):
         )
 
         self.assertIs(result, PlaybackResult.COMPLETED)
+        self.assertEqual(output.release_calls, 1)
         self.assertEqual(stop_event.wait_calls, [1.0, 1.0, 0.5, 1.0])
         self.assertEqual(
             output.records,
@@ -122,6 +133,7 @@ class PlaybackTests(unittest.TestCase):
         )
 
         self.assertIs(result, PlaybackResult.CANCELLED)
+        self.assertEqual(output.release_calls, 1)
         self.assertEqual(
             output.records,
             [("countdown", 3), ("result", PlaybackResult.CANCELLED)],
@@ -141,6 +153,7 @@ class PlaybackTests(unittest.TestCase):
         )
 
         self.assertIs(result, PlaybackResult.CANCELLED)
+        self.assertEqual(output.release_calls, 1)
         self.assertEqual(
             output.records,
             [
@@ -222,6 +235,26 @@ class PlaybackTests(unittest.TestCase):
         self.assertFalse(controller.is_playing)
         self.assertIn(("finish", 1, "1", True), output.records)
         self.assertIn(("result", PlaybackResult.CANCELLED), output.records)
+
+    def test_releases_output_when_playback_raises(self) -> None:
+        class FailingOutput(RecordingOutput):
+            def event_started(
+                self, index: int, event: NoteEvent, duration: float
+            ) -> None:
+                raise RuntimeError("模拟输出失败")
+
+        output = FailingOutput()
+
+        with self.assertRaisesRegex(RuntimeError, "模拟输出失败"):
+            play_song(
+                self.song,
+                FakeStopEvent(FakeClock()),  # type: ignore[arg-type]
+                output,
+                countdown_seconds=0,
+                clock=FakeClock(),
+            )
+
+        self.assertEqual(output.release_calls, 1)
 
 
 if __name__ == "__main__":

@@ -90,26 +90,46 @@ class WindowsHotkeyListener:
         self._registered_ids.clear()
 
 
-def run_hotkey_preview(song: Song, *, countdown_seconds: int = 3) -> int:
-    """Wait for global hotkeys and run repeatable timed terminal previews."""
+def run_hotkey_preview(
+    song: Song,
+    *,
+    countdown_seconds: int = 3,
+    real_input: bool = False,
+) -> int:
+    """Wait for global hotkeys and run repeatable timed playback."""
 
     output = ConsolePreviewOutput()
+    if real_input:
+        from .windows_input import WindowsInputOutput
+
+        output_factory = lambda: WindowsInputOutput(console=output)
+    else:
+        output_factory = lambda: output
     controller = PreviewController(
         song,
         countdown_seconds=countdown_seconds,
-        output_factory=lambda: output,
+        output_factory=output_factory,
     )
 
-    print(
-        "计时预演已就绪：F8 开始，F9 紧急停止，F10 暂停/继续，Ctrl+C 退出。",
-        flush=True,
-    )
+    if real_input:
+        print(
+            "真实输入模式已就绪：切换到测试窗口后按 F8；"
+            "F9 紧急停止，F10 暂停/继续，Ctrl+C 退出。",
+            flush=True,
+        )
+        print("播放中切换前台窗口会自动停止并释放全部输入。", flush=True)
+    else:
+        print(
+            "计时预演已就绪：F8 开始，F9 紧急停止，"
+            "F10 暂停/继续，Ctrl+C 退出。",
+            flush=True,
+        )
     try:
         with WindowsHotkeyListener() as listener:
             for hotkey in listener.events():
                 if hotkey is Hotkey.START:
                     if controller.is_playing:
-                        print("预演正在进行中，已忽略重复的 F8。", flush=True)
+                        print("播放正在进行中，已忽略重复的 F8。", flush=True)
                     else:
                         print("收到 F8，开始倒计时。", flush=True)
                         controller.start()
