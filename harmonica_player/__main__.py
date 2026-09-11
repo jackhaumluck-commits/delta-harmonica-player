@@ -5,17 +5,28 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from .library import SongSelectionError, SongSummary, list_songs, select_song_path
 from .playback import describe_event
 from .song import SongFormatError, load_song
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="预览口琴曲谱的按键动作")
-    parser.add_argument("score", type=Path, help="曲谱文件路径")
+    parser.add_argument("score", type=Path, nargs="?", help="曲谱文件路径")
+    parser.add_argument(
+        "--song",
+        metavar="NAME",
+        help="按名称选择内置曲目；使用 --list-songs 查看名称",
+    )
+    parser.add_argument(
+        "--list-songs",
+        action="store_true",
+        help="列出内置曲目并退出",
+    )
     parser.add_argument(
         "--timed",
         action="store_true",
-        help="按 BPM 计时预演，并使用 F8 开始、F9 停止（仅 Windows）",
+        help="按 BPM 计时预演，使用 F8/F9/F10 控制（仅 Windows）",
     )
     parser.add_argument(
         "--countdown",
@@ -26,11 +37,31 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    if args.list_songs:
+        if args.score is not None or args.song is not None:
+            parser.error("--list-songs 不能和曲谱路径或 --song 同时使用")
+        try:
+            _print_song_list(list_songs())
+        except (OSError, SongFormatError) as error:
+            parser.error(f"无法读取内置曲目：{error}")
+        return 0
+
+    if args.score is not None and args.song is not None:
+        parser.error("曲谱路径和 --song 只能选择一种")
+    if args.score is None and args.song is None:
+        parser.error("请提供曲谱路径，或使用 --song NAME 选择内置曲目")
+
     try:
-        song = load_song(args.score)
-    except (OSError, SongFormatError) as error:
+        if args.score is not None:
+            score_path = args.score
+        else:
+            assert args.song is not None
+            score_path = select_song_path(args.song)
+        song = load_song(score_path)
+    except (OSError, SongFormatError, SongSelectionError) as error:
         parser.error(str(error))
 
+    print(f"曲目: {score_path.stem}")
     print(f"BPM: {song.bpm:g}")
     print(f"事件数: {len(song.events)}")
     print(f"总时长: {song.duration_seconds:.3f} 秒")
@@ -64,6 +95,19 @@ def _non_negative_integer(value: str) -> int:
     if number < 0:
         raise argparse.ArgumentTypeError("不能小于零")
     return number
+
+
+def _print_song_list(songs: tuple[SongSummary, ...]) -> None:
+    if not songs:
+        print("没有找到内置曲目。")
+        return
+
+    print("可用的内置曲目：")
+    for song in songs:
+        print(
+            f"  {song.name:<20} BPM {song.bpm:g}, "
+            f"{song.event_count} 个事件, {song.duration_seconds:.3f} 秒"
+        )
 
 
 if __name__ == "__main__":

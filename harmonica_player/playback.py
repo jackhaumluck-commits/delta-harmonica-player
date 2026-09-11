@@ -15,6 +15,12 @@ class PlaybackResult(Enum):
     CANCELLED = "cancelled"
 
 
+class PauseToggleResult(Enum):
+    PAUSED = "paused"
+    RESUMED = "resumed"
+    NOT_PLAYING = "not_playing"
+
+
 class PreviewOutput(Protocol):
     """Receive playback events without knowing how they are displayed."""
 
@@ -27,6 +33,10 @@ class PreviewOutput(Protocol):
     def event_finished(
         self, index: int, event: NoteEvent, *, cancelled: bool
     ) -> None: ...
+
+    def playback_paused(self) -> None: ...
+
+    def playback_resumed(self) -> None: ...
 
     def playback_finished(self, result: PlaybackResult) -> None: ...
 
@@ -51,6 +61,12 @@ class ConsolePreviewOutput:
         suffix = "（停止）" if cancelled else ""
         print(f"     释放 {describe_event(event)}{suffix}", flush=True)
 
+    def playback_paused(self) -> None:
+        print("预演已暂停，按 F10 继续，按 F9 停止。", flush=True)
+
+    def playback_resumed(self) -> None:
+        print("预演继续。", flush=True)
+
     def playback_finished(self, result: PlaybackResult) -> None:
         if result is PlaybackResult.COMPLETED:
             message = "预演完成，等待 F8 再次开始。"
@@ -73,6 +89,7 @@ def play_song(
     output: PreviewOutput,
     *,
     countdown_seconds: int = 3,
+    pause_event: Event | None = None,
     clock: Callable[[], float] = monotonic,
 ) -> PlaybackResult:
     """Preview one song at its configured BPM, with prompt cancellation."""
@@ -86,7 +103,14 @@ def play_song(
             return _finish(output, PlaybackResult.CANCELLED)
         output.countdown(remaining)
         deadline += 1.0
-        if _wait_until(stop_event, deadline, clock):
+        cancelled, deadline = _wait_until(
+            stop_event,
+            deadline,
+            clock,
+            pause_event=pause_event,
+            output=output,
+        )
+        if cancelled:
             return _finish(output, PlaybackResult.CANCELLED)
 
     # Fixed deadlines keep small scheduling delays from accumulating as drift.
@@ -98,7 +122,13 @@ def play_song(
         duration = event.duration_seconds(song.bpm)
         output.event_started(index, event, duration)
         deadline += duration
-        cancelled = _wait_until(stop_event, deadline, clock)
+        cancelled, deadline = _wait_until(
+            stop_event,
+            deadline,
+            clock,
+            pause_event=pause_event,
+            output=output,
+        )
         output.event_finished(index, event, cancelled=cancelled)
 
         if cancelled:
@@ -108,14 +138,33 @@ def play_song(
 
 
 def _wait_until(
-    stop_event: Event, deadline: float, clock: Callable[[], float]
-) -> bool:
+    stop_event: Event,
+    deadline: float,
+    clock: Callable[[], float],
+    *,
+    pause_event: Event | None,
+    output: PreviewOutput,
+) -> tuple[bool, float]:
     while True:
+        if stop_event.is_set():
+            return True, deadline
+
+        if pause_event is not None and pause_event.is_set():
+            paused_at = clock()
+            output.playback_paused()
+            while pause_event.is_set():
+                if stop_event.wait(0.05):
+                    return True, deadline
+            deadline += clock() - paused_at
+            output.playback_resumed()
+
         remaining = deadline - clock()
         if remaining <= 0:
-            return stop_event.is_set()
-        if stop_event.wait(remaining):
-            return True
+            return stop_event.is_set(), deadline
+
+        wait_time = remaining if pause_event is None else min(remaining, 0.05)
+        if stop_event.wait(wait_time):
+            return True, deadline
 
 
 def _finish(output: PreviewOutput, result: PlaybackResult) -> PlaybackResult:
@@ -139,6 +188,7 @@ class PreviewController:
         self._lock = Lock()
         self._thread: Thread | None = None
         self._stop_event: Event | None = None
+        self._pause_event: Event | None = None
 
     def start(self) -> bool:
         """Start a preview; return False when one is already running."""
@@ -148,14 +198,19 @@ class PreviewController:
                 return False
 
             stop_event = Event()
+            pause_event = Event()
             thread = Thread(
                 target=play_song,
                 args=(self._song, stop_event, self._output_factory()),
-                kwargs={"countdown_seconds": self._countdown_seconds},
+                kwargs={
+                    "countdown_seconds": self._countdown_seconds,
+                    "pause_event": pause_event,
+                },
                 name="harmonica-preview",
                 daemon=True,
             )
             self._stop_event = stop_event
+            self._pause_event = pause_event
             self._thread = thread
             thread.start()
             return True
@@ -170,6 +225,19 @@ class PreviewController:
             self._stop_event.set()
             return True
 
+    def toggle_pause(self) -> PauseToggleResult:
+        """Pause or resume the active preview."""
+
+        with self._lock:
+            if self._thread is None or not self._thread.is_alive():
+                return PauseToggleResult.NOT_PLAYING
+            assert self._pause_event is not None
+            if self._pause_event.is_set():
+                self._pause_event.clear()
+                return PauseToggleResult.RESUMED
+            self._pause_event.set()
+            return PauseToggleResult.PAUSED
+
     def join(self, timeout: float | None = None) -> None:
         with self._lock:
             thread = self._thread
@@ -180,3 +248,13 @@ class PreviewController:
     def is_playing(self) -> bool:
         with self._lock:
             return self._thread is not None and self._thread.is_alive()
+
+    @property
+    def is_paused(self) -> bool:
+        with self._lock:
+            return (
+                self._thread is not None
+                and self._thread.is_alive()
+                and self._pause_event is not None
+                and self._pause_event.is_set()
+            )
