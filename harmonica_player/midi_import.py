@@ -49,6 +49,19 @@ class MidiConversion:
 
 
 @dataclass(frozen=True, slots=True)
+class MidiTrackSummary:
+    """Small, display-friendly description of one MIDI track."""
+
+    index: int
+    name: str | None
+    note_count: int
+
+    @property
+    def display_name(self) -> str:
+        return self.name or f"轨道 {self.index}"
+
+
+@dataclass(frozen=True, slots=True)
 class _ActiveNote:
     pitch: int
     channel: int
@@ -61,15 +74,7 @@ def convert_midi(
     """Read a MIDI file and convert one monophonic track into a :class:`Song`."""
 
     source_path = Path(source_path)
-    if not source_path.is_file():
-        raise MidiImportError(f"找不到 MIDI 文件：{source_path}")
-    if source_path.suffix.casefold() not in SUPPORTED_MIDI_SUFFIXES:
-        raise MidiImportError("只支持导入 .mid 或 .midi 文件")
-
-    try:
-        midi = MidiFile(source_path)
-    except (EOFError, OSError, ValueError) as error:
-        raise MidiImportError(f"无法读取 MIDI 文件：{error}") from error
+    midi = _load_midi(source_path)
 
     if midi.type == 2:
         raise MidiImportError("暂不支持异步多序列的 Type 2 MIDI 文件")
@@ -89,6 +94,20 @@ def convert_midi(
         ),
         track_index=selected_index,
         track_name=track_name,
+    )
+
+
+def list_midi_tracks(source_path: Path) -> tuple[MidiTrackSummary, ...]:
+    """Return every MIDI track so a graphical importer can offer a choice."""
+
+    midi = _load_midi(Path(source_path))
+    return tuple(
+        MidiTrackSummary(
+            index=index,
+            name=track.name.strip() or None,
+            note_count=sum(1 for message in track if _is_note_start(message)),
+        )
+        for index, track in enumerate(midi.tracks)
     )
 
 
@@ -170,6 +189,17 @@ def _select_track(midi: MidiFile, requested_index: int | None) -> int:
             "请使用 --midi-track 指定一个轨道"
         )
     return note_tracks[0]
+
+
+def _load_midi(source_path: Path) -> MidiFile:
+    if not source_path.is_file():
+        raise MidiImportError(f"找不到 MIDI 文件：{source_path}")
+    if source_path.suffix.casefold() not in SUPPORTED_MIDI_SUFFIXES:
+        raise MidiImportError("只支持导入 .mid 或 .midi 文件")
+    try:
+        return MidiFile(source_path)
+    except (EOFError, OSError, ValueError) as error:
+        raise MidiImportError(f"无法读取 MIDI 文件：{error}") from error
 
 
 def _constant_tempo(midi: MidiFile) -> int:

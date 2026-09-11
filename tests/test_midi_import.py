@@ -9,6 +9,7 @@ from harmonica_player.midi_import import (
     convert_midi,
     format_midi_song,
     import_midi,
+    list_midi_tracks,
     midi_pitch_to_event,
 )
 from harmonica_player.song import NoteEvent, parse_song
@@ -121,6 +122,12 @@ class MidiImportTests(unittest.TestCase):
 
             with self.assertRaisesRegex(MidiImportError, "--midi-track"):
                 convert_midi(path)
+
+            tracks = list_midi_tracks(path)
+            self.assertEqual(
+                [(track.index, track.name, track.note_count) for track in tracks],
+                [(0, None, 0), (1, "Lead", 1), (2, "Bass", 1)],
+            )
 
             conversion = convert_midi(path, track_index=2)
             self.assertEqual(conversion.track_name, "Bass")

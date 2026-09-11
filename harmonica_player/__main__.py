@@ -21,6 +21,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="预览或播放口琴曲谱的按键动作")
     parser.add_argument("score", type=Path, nargs="?", help="曲谱文件路径")
     parser.add_argument(
+        "--gui",
+        action="store_true",
+        help="打开 v0.9 桌面界面",
+    )
+    parser.add_argument(
         "--song",
         metavar="NAME",
         help="按文件名或标题选择曲库中的曲目；使用 --list-songs 查看名称",
@@ -92,6 +97,26 @@ def main() -> int:
         help="暂停或继续快捷键（默认：F10）",
     )
     args = parser.parse_args()
+
+    if args.gui:
+        if (
+            args.score is not None
+            or args.song is not None
+            or args.list_songs
+            or args.import_song is not None
+            or args.import_midi is not None
+            or args.midi_track is not None
+            or args.timed
+            or args.real_input
+            or args.input_test_window
+        ):
+            parser.error("--gui 不能和命令行曲谱、导入或播放选项同时使用")
+        from .gui import run_gui
+
+        try:
+            return run_gui()
+        except RuntimeError as error:
+            parser.error(str(error))
 
     if args.input_test_window:
         if (
