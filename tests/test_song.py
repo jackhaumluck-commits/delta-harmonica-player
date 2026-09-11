@@ -18,6 +18,7 @@ class ParseSongTests(unittest.TestCase):
         )
 
         self.assertEqual(song.bpm, 120)
+        self.assertIsNone(song.title)
         self.assertEqual(len(song.events), 5)
         self.assertEqual(song.events[0].key, "Z")
         self.assertEqual(song.events[1].mouse_button, "left")
@@ -26,6 +27,19 @@ class ParseSongTests(unittest.TestCase):
         self.assertEqual(song.events[3].mouse_button, "right")
         self.assertTrue(song.events[4].is_rest)
         self.assertAlmostEqual(song.duration_seconds, 2.5)
+
+    def test_parses_optional_title(self) -> None:
+        song = parse_song("bpm 90\ntitle 变调 按键练习\n1 1 normal")
+
+        self.assertEqual(song.title, "变调 按键练习")
+
+    def test_rejects_title_after_notes(self) -> None:
+        with self.assertRaisesRegex(SongFormatError, "标题必须写在第一个音符之前"):
+            parse_song("bpm 120\n1 1 normal\ntitle 太晚了")
+
+    def test_rejects_duplicate_title(self) -> None:
+        with self.assertRaisesRegex(SongFormatError, "标题只能设置一次"):
+            parse_song("bpm 120\ntitle 第一首\ntitle 第二首\n1 1 normal")
 
     def test_requires_bpm_before_notes(self) -> None:
         with self.assertRaisesRegex(SongFormatError, "请先设置 BPM"):

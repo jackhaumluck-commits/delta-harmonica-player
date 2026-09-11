@@ -23,6 +23,12 @@ class ExampleScoreTests(unittest.TestCase):
         self.assertEqual(len(song.events), 14)
         self.assertAlmostEqual(song.duration_seconds, 12.0)
 
+    def test_modifier_exercise_covers_all_mouse_modifiers(self) -> None:
+        song = load_song(EXAMPLES_DIRECTORY / "modifier_exercise.song")
+
+        modifiers = {event.modifier for event in song.events if not event.is_rest}
+        self.assertEqual(modifiers, {"normal", "down", "semitone", "up"})
+
 
 if __name__ == "__main__":
     unittest.main()

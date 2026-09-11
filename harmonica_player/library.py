@@ -18,10 +18,15 @@ class SongSelectionError(ValueError):
 @dataclass(frozen=True, slots=True)
 class SongSummary:
     name: str
+    title: str | None
     path: Path
     bpm: float
     event_count: int
     duration_seconds: float
+
+    @property
+    def display_name(self) -> str:
+        return self.title or self.name
 
 
 def list_songs(directory: Path = DEFAULT_SONG_DIRECTORY) -> tuple[SongSummary, ...]:
@@ -33,6 +38,7 @@ def list_songs(directory: Path = DEFAULT_SONG_DIRECTORY) -> tuple[SongSummary, .
         summaries.append(
             SongSummary(
                 name=path.stem,
+                title=song.title,
                 path=path,
                 bpm=song.bpm,
                 event_count=len(song.events),
@@ -47,13 +53,24 @@ def select_song_path(
 ) -> Path:
     """Resolve a bundled song by its stem or filename."""
 
-    requested_name = name.casefold()
+    requested_name = name.strip().casefold()
     if requested_name.endswith(".song"):
         requested_name = requested_name.removesuffix(".song")
     songs = list_songs(directory)
     for summary in songs:
-        if summary.name.casefold() == requested_name:
+        aliases = {summary.name.casefold()}
+        if summary.title is not None:
+            aliases.add(summary.title.casefold())
+        if requested_name in aliases:
             return summary.path
 
-    available = ", ".join(summary.name for summary in songs) or "（没有曲目）"
+    available = ", ".join(
+        _describe_song(summary) for summary in songs
+    ) or "（没有曲目）"
     raise SongSelectionError(f"未知曲目 '{name}'；可用曲目：{available}")
+
+
+def _describe_song(song: SongSummary) -> str:
+    if song.title is None:
+        return song.name
+    return f"{song.name}（{song.title}）"

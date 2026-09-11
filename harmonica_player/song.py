@@ -56,6 +56,7 @@ class NoteEvent:
 class Song:
     bpm: float
     events: tuple[NoteEvent, ...]
+    title: str | None = None
 
     @property
     def duration_seconds(self) -> float:
@@ -66,6 +67,7 @@ def parse_song(text: str) -> Song:
     """Parse score text and return an immutable :class:`Song`."""
 
     bpm: float | None = None
+    title: str | None = None
     events: list[NoteEvent] = []
 
     for line_number, raw_line in enumerate(text.splitlines(), start=1):
@@ -80,6 +82,18 @@ def parse_song(text: str) -> Song:
             if len(parts) != 2:
                 raise SongFormatError(f"第 {line_number} 行：BPM 格式应为 'bpm 120'")
             bpm = _parse_positive_number(parts[1], line_number, "BPM")
+            continue
+
+        if parts[0].lower() == "title":
+            if bpm is None:
+                raise SongFormatError(f"第 {line_number} 行：请先设置 BPM")
+            if title is not None:
+                raise SongFormatError(f"第 {line_number} 行：标题只能设置一次")
+            if events:
+                raise SongFormatError(f"第 {line_number} 行：标题必须写在第一个音符之前")
+            if len(parts) < 2:
+                raise SongFormatError(f"第 {line_number} 行：标题格式应为 'title 曲名'")
+            title = " ".join(parts[1:])
             continue
 
         if bpm is None:
@@ -112,7 +126,7 @@ def parse_song(text: str) -> Song:
     if not events:
         raise SongFormatError("曲谱中没有音符")
 
-    return Song(bpm=bpm, events=tuple(events))
+    return Song(bpm=bpm, events=tuple(events), title=title)
 
 
 def load_song(path: Path) -> Song:

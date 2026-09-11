@@ -61,7 +61,10 @@ def main() -> int:
     except (OSError, SongFormatError, SongSelectionError) as error:
         parser.error(str(error))
 
-    print(f"曲目: {score_path.stem}")
+    if song.title is None:
+        print(f"曲目: {score_path.stem}")
+    else:
+        print(f"曲目: {song.title} ({score_path.stem})")
     print(f"BPM: {song.bpm:g}")
     print(f"事件数: {len(song.events)}")
     print(f"总时长: {song.duration_seconds:.3f} 秒")
@@ -105,7 +108,7 @@ def _print_song_list(songs: tuple[SongSummary, ...]) -> None:
     print("可用的内置曲目：")
     for song in songs:
         print(
-            f"  {song.name:<20} BPM {song.bpm:g}, "
+            f"  {song.name:<20} {song.display_name} | BPM {song.bpm:g}, "
             f"{song.event_count} 个事件, {song.duration_seconds:.3f} 秒"
         )
 
