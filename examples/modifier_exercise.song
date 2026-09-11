@@ -1,0 +1,23 @@
+# 变调按键练习：同一个音符依次使用普通、降调、半音和升调
+bpm 90
+title 变调按键练习
+
+# 低音区练习
+1 1 normal
+1 1 down
+1 1 semitone
+1 1 up
+0 0.5 rest
+
+# 中音区练习
+5 1 normal
+5 1 down
+5 1 semitone
+5 1 up
+0 0.5 rest
+
+# 高音区练习
+8 1 normal
+8 1 down
+8 1 semitone
+8 1 up
