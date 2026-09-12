@@ -8,6 +8,7 @@ from collections.abc import Iterator
 from ctypes import wintypes
 from dataclasses import dataclass
 from enum import Enum
+from threading import Event
 from time import sleep
 
 from .playback import ConsolePreviewOutput, PauseToggleResult, PreviewController
@@ -27,6 +28,18 @@ _MOD_NOREPEAT = 0x4000
 _VK_F1 = 0x70
 _WM_HOTKEY = 0x0312
 _PM_REMOVE = 0x0001
+
+
+class HotkeyRegistrationError(RuntimeError):
+    """Raised when Windows refuses one specific global hotkey."""
+
+    def __init__(self, key: str, error_code: int) -> None:
+        self.key = key
+        self.error_code = error_code
+        super().__init__(
+            f"{key} 无法注册，通常是因为已被其他程序占用"
+            f"（WinError {error_code}）"
+        )
 
 
 def normalize_function_key(value: str) -> str:
@@ -86,11 +99,11 @@ class WindowsHotkeyListener:
     def __exit__(self, *args: object) -> None:
         self._unregister_all()
 
-    def events(self) -> Iterator[Hotkey]:
+    def events(self, stop_event: Event | None = None) -> Iterator[Hotkey]:
         user32 = ctypes.WinDLL("user32", use_last_error=True)
         message = wintypes.MSG()
 
-        while True:
+        while stop_event is None or not stop_event.is_set():
             found = user32.PeekMessageW(
                 ctypes.byref(message),
                 None,
@@ -113,7 +126,7 @@ class WindowsHotkeyListener:
         user32 = ctypes.WinDLL("user32", use_last_error=True)
         virtual_key = self._bindings.virtual_key(key)
         if not user32.RegisterHotKey(None, hotkey_id, _MOD_NOREPEAT, virtual_key):
-            raise ctypes.WinError(ctypes.get_last_error())
+            raise HotkeyRegistrationError(key, ctypes.get_last_error())
         self._registered_ids.append(hotkey_id)
 
     def _unregister_all(self) -> None:

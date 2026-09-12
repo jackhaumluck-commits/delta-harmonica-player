@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from harmonica_player.hotkeys import (
     HotkeyBindings,
+    HotkeyRegistrationError,
     normalize_function_key,
     run_hotkey_preview,
 )
@@ -37,6 +38,12 @@ class HotkeyBindingsTests(unittest.TestCase):
     def test_rejects_duplicate_bindings(self) -> None:
         with self.assertRaisesRegex(ValueError, "必须互不相同"):
             HotkeyBindings(start="F8", stop="f08", pause="F10")
+
+    def test_registration_error_identifies_the_busy_key(self) -> None:
+        error = HotkeyRegistrationError("F8", 1409)
+
+        self.assertIn("F8", str(error))
+        self.assertIn("1409", str(error))
 
 
 if __name__ == "__main__":

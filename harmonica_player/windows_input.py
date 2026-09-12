@@ -7,7 +7,7 @@ import sys
 from ctypes import wintypes
 from typing import Callable, Protocol
 
-from .playback import ConsolePreviewOutput, PlaybackResult
+from .playback import ConsolePreviewOutput, PlaybackOutput, PlaybackResult
 from .song import NoteEvent
 
 
@@ -211,7 +211,7 @@ class WindowsInputOutput:
         self,
         *,
         sender: InputSender | None = None,
-        console: ConsolePreviewOutput | None = None,
+        console: PlaybackOutput | None = None,
         notice: Callable[[str], None] = print,
     ) -> None:
         self._sender = sender or WindowsInputSender()
