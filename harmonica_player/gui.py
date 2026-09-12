@@ -60,7 +60,8 @@ _TUTORIAL_SECTIONS = (
         "2. 导入 MIDI",
         "点击“导入 MIDI”，选择 .mid 或 .midi 文件。"
         "如果文件包含多个可演奏轨道，程序会请你选择其中一个；"
-        "轨道内出现和弦时会自动保留每个时刻的最高音作为主旋律。",
+        "轨道内出现和弦时会自动保留每个时刻的最高音，"
+        "音域外的音会移动到最近的可演奏八度。",
     ),
     (
         "3. 选择模式并开始",
@@ -846,10 +847,19 @@ class HarmonicaPlayerApp:
             )
             self._append_log(f"MIDI 导入失败：{error}")
             return
-        detail = None
+        details: list[str] = []
         if result.conversion.polyphony_detected:
-            detail = "检测到和弦，已自动保留每个时刻的最高音作为主旋律。"
-        self._finish_import(result.summary, detail=detail)
+            details.append(
+                "检测到和弦，已自动保留每个时刻的最高音作为主旋律。"
+            )
+        if result.conversion.octave_folding_detected:
+            details.append(
+                "检测到音域外音符，已按音名移动到最近的可演奏八度。"
+            )
+        self._finish_import(
+            result.summary,
+            detail="\n".join(details) if details else None,
+        )
 
     def _show_tutorial(self) -> None:
         """Open a concise guide for importing songs and starting playback."""

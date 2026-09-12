@@ -47,6 +47,7 @@ class MidiConversion:
     track_index: int
     track_name: str | None
     polyphony_detected: bool = False
+    octave_folding_detected: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,7 +86,7 @@ def convert_midi(
 
     selected_index = _select_track(midi, track_index)
     tempo = _constant_tempo(midi)
-    events, polyphony_detected = _convert_track(
+    events, polyphony_detected, octave_folding_detected = _convert_track(
         midi.tracks[selected_index], midi.ticks_per_beat
     )
     title = source_path.stem.replace("#", "＃").strip() or "MIDI 导入曲目"
@@ -99,6 +100,7 @@ def convert_midi(
         track_index=selected_index,
         track_name=track_name,
         polyphony_detected=polyphony_detected,
+        octave_folding_detected=octave_folding_detected,
     )
 
 
@@ -168,6 +170,8 @@ def format_midi_song(conversion: MidiConversion) -> str:
     ]
     if conversion.polyphony_detected:
         lines.append("# 和弦处理：已保留每个时刻的最高音作为单旋律")
+    if conversion.octave_folding_detected:
+        lines.append("# 音域处理：已将无法直接演奏的音移入最近的可用八度")
     lines.extend(
         [
             f"bpm {_format_number(conversion.song.bpm)}",
@@ -186,13 +190,8 @@ def midi_pitch_to_event(pitch: int, beats: float) -> NoteEvent:
     """Map a MIDI pitch to one playable key and mouse modifier."""
 
     mapping = _pitch_mapping()
-    try:
-        note, modifier = mapping[pitch]
-    except KeyError as error:
-        raise MidiImportError(
-            f"MIDI 音符 {_pitch_name(pitch)}（{pitch}）超出当前可演奏映射；"
-            "支持 C3 到 C6 的自然音，以及 C4 到 B4 的升半音"
-        ) from error
+    playable_pitch, _folded = _nearest_playable_pitch(pitch, mapping)
+    note, modifier = mapping[playable_pitch]
     return NoteEvent(note=note, beats=beats, modifier=modifier)
 
 
@@ -255,7 +254,7 @@ def _constant_tempo(midi: MidiFile) -> int:
 
 def _convert_track(
     track: object, ticks_per_beat: int
-) -> tuple[tuple[NoteEvent, ...], bool]:
+) -> tuple[tuple[NoteEvent, ...], bool, bool]:
     messages_by_tick: dict[int, list[object]] = defaultdict(list)
     absolute_tick = 0
     for message in track:
@@ -268,11 +267,12 @@ def _convert_track(
     last_tick = 0
     interval_starts_new_event = True
     polyphony_detected = False
+    octave_folding_detected = False
     for tick in sorted(messages_by_tick):
         messages = messages_by_tick[tick]
         selected_before = _highest_active_pitch(active)
         if tick > last_tick:
-            _append_interval(
+            octave_folding_detected |= _append_interval(
                 events,
                 selected_before,
                 tick - last_tick,
@@ -324,7 +324,7 @@ def _convert_track(
         )
     if not events:
         raise MidiImportError("所选 MIDI 轨道中没有可转换的完整音符")
-    return tuple(events), polyphony_detected
+    return tuple(events), polyphony_detected, octave_folding_detected
 
 
 def _highest_active_pitch(active: dict[tuple[int, int], int]) -> int | None:
@@ -340,13 +340,16 @@ def _append_interval(
     ticks_per_beat: int,
     *,
     starts_new_event: bool,
-) -> None:
+) -> bool:
     beats = duration_ticks / ticks_per_beat
-    event = (
-        NoteEvent(note="0", beats=beats, modifier="rest")
-        if pitch is None
-        else midi_pitch_to_event(pitch, beats)
-    )
+    folded = False
+    if pitch is None:
+        event = NoteEvent(note="0", beats=beats, modifier="rest")
+    else:
+        mapping = _pitch_mapping()
+        playable_pitch, folded = _nearest_playable_pitch(pitch, mapping)
+        note, modifier = mapping[playable_pitch]
+        event = NoteEvent(note=note, beats=beats, modifier=modifier)
     if (
         not starts_new_event
         and events
@@ -359,8 +362,27 @@ def _append_interval(
             beats=previous.beats + event.beats,
             modifier=previous.modifier,
         )
-        return
+        return folded
     events.append(event)
+    return folded
+
+
+def _nearest_playable_pitch(
+    pitch: int, mapping: dict[int, tuple[str, str]]
+) -> tuple[int, bool]:
+    if pitch in mapping:
+        return pitch, False
+
+    same_pitch_class = [
+        playable_pitch
+        for playable_pitch in mapping
+        if playable_pitch % 12 == pitch % 12
+    ]
+    nearest = min(
+        same_pitch_class,
+        key=lambda playable_pitch: abs(playable_pitch - pitch),
+    )
+    return nearest, True
 
 
 def _pitch_mapping() -> dict[int, tuple[str, str]]:

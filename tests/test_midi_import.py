@@ -46,6 +46,8 @@ class MidiImportTests(unittest.TestCase):
             self.assertEqual(conversion.song.title, "练习曲")
             self.assertEqual(conversion.track_index, 0)
             self.assertEqual(conversion.track_name, "Melody")
+            self.assertFalse(conversion.polyphony_detected)
+            self.assertFalse(conversion.octave_folding_detected)
             self.assertEqual(
                 [
                     (event.note, event.beats, event.modifier)
@@ -255,16 +257,26 @@ class MidiImportTests(unittest.TestCase):
             with self.assertRaisesRegex(MidiImportError, "改变 BPM"):
                 convert_midi(path)
 
-    def test_rejects_unplayable_pitch_and_unfinished_note(self) -> None:
+    def test_folds_unplayable_pitch_into_nearest_octave(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
             unplayable = root / "unplayable.mid"
-            unfinished = root / "unfinished.mid"
             self._save_notes(unplayable, [(49, 480)])
+
+            conversion = convert_midi(unplayable)
+
+            self.assertTrue(conversion.octave_folding_detected)
+            self.assertEqual(
+                conversion.song.events,
+                (NoteEvent("1", 1.0, "semitone"),),
+            )
+            self.assertIn("音域处理", format_midi_song(conversion))
+
+    def test_rejects_unfinished_note(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            unfinished = Path(temporary_directory) / "unfinished.mid"
             self._save_notes(unfinished, [(60, None)])
 
-            with self.assertRaisesRegex(MidiImportError, "C#3"):
-                convert_midi(unplayable)
             with self.assertRaisesRegex(MidiImportError, "缺少对应的结束事件"):
                 convert_midi(unfinished)
 
@@ -275,6 +287,14 @@ class MidiImportTests(unittest.TestCase):
         )
         self.assertEqual(midi_pitch_to_event(72, 1).modifier, "normal")
         self.assertEqual(midi_pitch_to_event(84, 1).modifier, "up")
+        self.assertEqual(
+            midi_pitch_to_event(49, 1),
+            NoteEvent("1", 1, "semitone"),
+        )
+        self.assertEqual(
+            midi_pitch_to_event(96, 1),
+            NoteEvent("8", 1, "up"),
+        )
 
     @staticmethod
     def _save_notes(path: Path, notes: list[tuple[int, int | None]]) -> None:

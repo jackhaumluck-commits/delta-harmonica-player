@@ -78,6 +78,7 @@ class GuiContentTests(unittest.TestCase):
         self.assertIn("导入文本曲谱", tutorial)
         self.assertIn("导入 MIDI", tutorial)
         self.assertIn("最高音", tutorial)
+        self.assertIn("可演奏八度", tutorial)
         self.assertIn("安全预演", tutorial)
         self.assertIn("F8 开始、F9 停止、F10 暂停或继续", tutorial)
 
