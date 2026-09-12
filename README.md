@@ -1,6 +1,6 @@
 # 三角洲口琴自动演奏器（学习项目）
 
-这是一个用 Python 编写的口琴曲谱播放器。当前正在开发 v1.0，已有可视化桌面界面，可以直接选择曲目、查看信息、导入曲谱或 MIDI、设置热键并控制播放；原有命令行功能仍然保留。
+这是一个用 Python 编写的口琴曲谱播放器。当前版本为 v1.0.0，已有可视化桌面界面，可以直接选择曲目、查看信息、导入曲谱或 MIDI、设置热键并控制播放；原有命令行功能仍然保留。
 
 > 默认模式不会发送真实输入。只有使用 `--real-input` 才会向当前前台窗口发送 Windows 键鼠事件。游戏对第三方自动化程序可能有处罚，请在用于游戏前确认当时有效的官方规则并自行评估账号风险。本项目不会读取、修改或注入游戏进程，也不会实现反作弊绕过。
 
@@ -55,7 +55,13 @@ title 我的曲子
 
 以 `#` 开头的内容是注释。拍数可以是整数或小数，但必须大于零。
 
-## 运行
+## 下载 Windows 版
+
+不想安装 Python 时，可以前往 [GitHub Releases](https://github.com/jackhaumluck-commits/delta-harmonica-player/releases) 下载最新版 `DeltaHarmonicaPlayer.exe`，保存到任意文件夹后双击启动。程序不需要安装，用户曲谱和设置仍会保存在 `%LOCALAPPDATA%\DeltaHarmonicaPlayer` 中。
+
+需要向游戏发送真实输入时，请右键可执行文件并选择“以管理员身份运行”。发布文件目前没有数字签名，因此 Windows 首次打开时可能显示安全提醒；请只从本项目的 GitHub Releases 页面下载，并可用同一页面提供的 `.sha256` 文件核对完整性。
+
+## 运行源码
 
 需要 Python 3.10 或更高版本。首次使用或依赖发生变化时，在项目目录中安装项目：
 
@@ -125,7 +131,7 @@ python -X utf8 -m harmonica_player --song "我的曲子"
 
 ### 导入 MIDI
 
-v0.8 可以把单旋律 MIDI 转换成可编辑的 `.song` 文件并加入用户曲库：
+v1.0 可以把 MIDI 旋律转换成可编辑的 `.song` 文件并加入用户曲库：
 
 ```powershell
 python -X utf8 -m harmonica_player --import-midi "D:\Music\melody.mid"
@@ -241,9 +247,22 @@ python -m unittest discover -s tests -v
 
 每次向 GitHub 推送 `main` 或创建 PR 时，GitHub Actions 也会在 Python 3.10 和 3.13 上自动运行这些测试。
 
-## 计划
+### 构建 Windows 可执行文件
 
-1. v1.0：打包 Windows 可执行文件，并通过 GitHub Releases 发布。
+需要 Python 3.10 或更高版本。安装打包工具并执行构建脚本：
+
+```powershell
+python -m pip install ".[build]"
+.\scripts\build_windows.ps1
+```
+
+生成的文件位于 `dist\DeltaHarmonicaPlayer.exe`，旁边的 `.sha256` 文件用于校验下载是否完整。GitHub 上推送与程序版本一致的标签（例如 `v1.0.0`）时，发布流程会自动测试、打包，并把这两个文件加入 GitHub Release；手动运行该流程只会生成可下载的测试产物。
+
+## v1.0
+
+- 提供可视化曲库、曲谱与 MIDI 导入、热键设置和播放控制。
+- 提供 Windows 单文件可执行程序，并通过 GitHub Releases 发布。
+- 内置《小星星》、变调练习和《送别》曲谱。
 
 不会加入运行时速度倍率、从指定事件开始或循环播放；BPM 继续作为曲谱本身的节奏信息保留。
 

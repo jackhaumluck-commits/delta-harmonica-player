@@ -1,0 +1,143 @@
+# 《送别》经典主旋律，1=C，4/4
+# 曲调源自 John P. Ordway 于 1868 年创作的 Dreaming of Home and Mother
+# 高音 1 使用 8 normal；高音 2、3 使用 up；低音 7 使用 down
+# 每个相邻音之间的 0.025 拍休止在 BPM 75 下约为 0.02 秒
+# 原谱的四拍句尾音限制在 2 秒以内，剩余拍数作为换气休止
+bpm 75
+title 送别（让子弹飞片头旋律）
+
+# 第一乐句
+5 0.975 normal
+0 0.025 rest
+3 0.475 normal
+0 0.025 rest
+5 0.475 normal
+0 0.025 rest
+8 1.975 normal
+0 0.025 rest
+
+6 0.975 normal
+0 0.025 rest
+8 0.975 normal
+0 0.025 rest
+5 1.975 normal
+0 0.025 rest
+
+5 0.975 normal
+0 0.025 rest
+8 0.475 normal
+0 0.025 rest
+2 0.475 up
+0 0.025 rest
+3 0.975 up
+0 0.025 rest
+2 0.475 up
+0 0.025 rest
+8 0.475 normal
+0 0.025 rest
+
+2 2.475 up
+0 1.525 rest
+
+# 第二乐句
+5 0.975 normal
+0 0.025 rest
+3 0.475 normal
+0 0.025 rest
+5 0.475 normal
+0 0.025 rest
+8 1.475 normal
+0 0.025 rest
+7 0.475 normal
+0 0.025 rest
+
+6 0.975 normal
+0 0.025 rest
+8 0.975 normal
+0 0.025 rest
+5 1.975 normal
+0 0.025 rest
+
+5 0.975 normal
+0 0.025 rest
+2 0.475 normal
+0 0.025 rest
+3 0.475 normal
+0 0.025 rest
+4 0.975 normal
+0 0.025 rest
+7 0.975 down
+0 0.025 rest
+
+1 2.475 normal
+0 1.525 rest
+
+# 第三乐句
+6 0.975 normal
+0 0.025 rest
+8 0.975 normal
+0 0.025 rest
+8 1.975 normal
+0 0.025 rest
+
+7 0.975 normal
+0 0.025 rest
+6 0.475 normal
+0 0.025 rest
+7 0.475 normal
+0 0.025 rest
+8 1.975 normal
+0 0.025 rest
+
+6 0.475 normal
+0 0.025 rest
+7 0.475 normal
+0 0.025 rest
+8 0.475 normal
+0 0.025 rest
+6 0.475 normal
+0 0.025 rest
+6 0.475 normal
+0 0.025 rest
+5 0.475 normal
+0 0.025 rest
+3 0.475 normal
+0 0.025 rest
+1 0.475 normal
+0 0.025 rest
+
+2 2.475 normal
+0 1.525 rest
+
+# 第四乐句
+5 0.975 normal
+0 0.025 rest
+3 0.475 normal
+0 0.025 rest
+5 0.475 normal
+0 0.025 rest
+8 1.475 normal
+0 0.025 rest
+7 0.475 normal
+0 0.025 rest
+
+6 0.975 normal
+0 0.025 rest
+8 0.975 normal
+0 0.025 rest
+5 1.975 normal
+0 0.025 rest
+
+5 0.975 normal
+0 0.025 rest
+2 0.475 normal
+0 0.025 rest
+3 0.475 normal
+0 0.025 rest
+4 0.975 normal
+0 0.025 rest
+7 0.975 down
+0 0.025 rest
+
+1 2.5 normal
+0 1.5 rest

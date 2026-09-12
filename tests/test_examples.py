@@ -29,6 +29,25 @@ class ExampleScoreTests(unittest.TestCase):
         modifiers = {event.modifier for event in song.events if not event.is_rest}
         self.assertEqual(modifiers, {"normal", "down", "semitone", "up"})
 
+    def test_song_bie_has_stable_game_input_timing(self) -> None:
+        song = load_song(EXAMPLES_DIRECTORY / "song_bie.song")
+        notes = [event for event in song.events if not event.is_rest]
+        rests = [event for event in song.events if event.is_rest]
+
+        self.assertEqual(song.title, "送别（让子弹飞片头旋律）")
+        self.assertEqual(len(notes), 58)
+        self.assertEqual(len(rests), 58)
+        self.assertAlmostEqual(song.duration_seconds, 51.2)
+        self.assertTrue(
+            all(event.duration_seconds(song.bpm) >= 0.02 for event in rests)
+        )
+        self.assertLessEqual(
+            max(event.duration_seconds(song.bpm) for event in notes), 2.0
+        )
+        self.assertEqual(
+            {event.modifier for event in notes}, {"normal", "down", "up"}
+        )
+
     def test_user_song_import_template_can_be_loaded(self) -> None:
         song = load_song(EXAMPLES_DIRECTORY / "user_song_template.txt")
 

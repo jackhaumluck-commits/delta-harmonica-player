@@ -23,14 +23,19 @@ class SongLibraryTests(unittest.TestCase):
 
         self.assertEqual(
             [song.name for song in songs],
-            ["demo", "modifier_exercise", "twinkle_twinkle"],
+            ["demo", "modifier_exercise", "song_bie", "twinkle_twinkle"],
         )
         self.assertEqual(
             [song.title for song in songs],
-            ["按键与变调演示", "变调按键练习", "小星星（第一段）"],
+            [
+                "按键与变调演示",
+                "变调按键练习",
+                "送别（让子弹飞片头旋律）",
+                "小星星（第一段）",
+            ],
         )
-        self.assertEqual(songs[2].event_count, 14)
-        self.assertAlmostEqual(songs[2].duration_seconds, 12.0)
+        self.assertEqual(songs[3].event_count, 14)
+        self.assertAlmostEqual(songs[3].duration_seconds, 12.0)
         self.assertTrue(all(song.source is SongSource.BUNDLED for song in songs))
 
     def test_selects_song_by_stem_or_filename(self) -> None:
