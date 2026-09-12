@@ -164,7 +164,7 @@ class MidiImportTests(unittest.TestCase):
             )
             self.assertIn("和弦处理", format_midi_song(conversion))
 
-    def test_tracks_highest_note_through_overlapping_notes(self) -> None:
+    def test_new_onset_replaces_held_note_and_preserves_timeline(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             path = Path(temporary_directory) / "overlap.mid"
             midi = MidiFile(ticks_per_beat=480)
@@ -187,7 +187,7 @@ class MidiImportTests(unittest.TestCase):
                 (
                     NoteEvent("1", 0.5, "normal"),
                     NoteEvent("5", 0.5, "normal"),
-                    NoteEvent("1", 0.5, "normal"),
+                    NoteEvent("0", 0.5, "rest"),
                 ),
             )
 
@@ -217,7 +217,7 @@ class MidiImportTests(unittest.TestCase):
                 ),
             )
 
-    def test_does_not_retrigger_held_high_note_for_lower_voice_changes(self) -> None:
+    def test_new_onset_prevents_held_note_from_masking_rhythm(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             path = Path(temporary_directory) / "held_high.mid"
             midi = MidiFile(ticks_per_beat=480)
@@ -236,7 +236,35 @@ class MidiImportTests(unittest.TestCase):
 
             self.assertEqual(
                 conversion.song.events,
-                (NoteEvent("5", 1.5, "normal"),),
+                (
+                    NoteEvent("5", 0.5, "normal"),
+                    NoteEvent("1", 0.5, "normal"),
+                    NoteEvent("0", 0.5, "rest"),
+                ),
+            )
+
+    def test_clusters_slightly_rolled_chord_into_one_onset(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            path = Path(temporary_directory) / "rolled_chord.mid"
+            midi = MidiFile(ticks_per_beat=480)
+            track = MidiTrack(
+                [
+                    Message("note_on", note=60, velocity=64, time=0),
+                    Message("note_on", note=64, velocity=64, time=8),
+                    Message("note_on", note=67, velocity=64, time=8),
+                    Message("note_off", note=60, velocity=0, time=464),
+                    Message("note_off", note=64, velocity=0, time=0),
+                    Message("note_off", note=67, velocity=0, time=0),
+                ]
+            )
+            midi.tracks.append(track)
+            midi.save(path)
+
+            conversion = convert_midi(path)
+
+            self.assertEqual(
+                conversion.song.events,
+                (NoteEvent("5", 1.0, "normal"),),
             )
 
     def test_rejects_tempo_changes_during_playback(self) -> None:

@@ -150,7 +150,7 @@ python -X utf8 -m harmonica_player --song generated_midi_scale
 python -X utf8 -m harmonica_player --import-midi "D:\Music\multi-track.mid" --midi-track 1
 ```
 
-默认音高映射以 MIDI 中央 C（编号 60）作为 `1 normal`：低一个八度使用 `down`，高一个八度使用 `up`，中央八度的升半音使用 `semitone`。当所选轨道中出现和弦或重叠音符时，程序会保留每个时刻的最高音作为单旋律；无法直接演奏的高低音或外部八度半音会保持音名，并移动到最近的可演奏八度。程序会在生成曲谱和导入结果中说明这些有损转换。当前仍不支持播放中改变 BPM 或延音踏板。
+默认音高映射以 MIDI 中央 C（编号 60）作为 `1 normal`：低一个八度使用 `down`，高一个八度使用 `up`，中央八度的升半音使用 `semitone`。当所选轨道中出现和弦或重叠音符时，相近起奏的音符会合并成一组并保留每组最高音；下一组开始时会结束上一音，避免钢琴延音遮住后续节奏。无法直接演奏的高低音或外部八度半音会保持音名，并移动到最近的可演奏八度。程序会在生成曲谱和导入结果中说明这些有损转换。当前仍不支持播放中改变 BPM 或延音踏板。
 
 MIDI 解析使用 [Mido](https://mido.readthedocs.io/en/stable/)，项目只需要它的文件读取能力，不需要实时 MIDI 端口后端。
 

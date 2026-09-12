@@ -60,7 +60,7 @@ _TUTORIAL_SECTIONS = (
         "2. 导入 MIDI",
         "点击“导入 MIDI”，选择 .mid 或 .midi 文件。"
         "如果文件包含多个可演奏轨道，程序会请你选择其中一个；"
-        "轨道内出现和弦时会自动保留每个时刻的最高音，"
+        "相近起奏的和弦音会合并成一组并保留每组最高音，"
         "音域外的音会移动到最近的可演奏八度。",
     ),
     (
@@ -850,7 +850,7 @@ class HarmonicaPlayerApp:
         details: list[str] = []
         if result.conversion.polyphony_detected:
             details.append(
-                "检测到和弦，已自动保留每个时刻的最高音作为主旋律。"
+                "检测到和弦，已按相近起奏时间分组并保留每组最高音。"
             )
         if result.conversion.octave_folding_detected:
             details.append(

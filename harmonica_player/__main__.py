@@ -188,7 +188,7 @@ def main() -> int:
             f"({result.summary.path.name})"
         )
         if result.conversion.polyphony_detected:
-            print("检测到和弦：已保留每个时刻的最高音作为主旋律。")
+            print("检测到和弦：已按相近起奏时间分组并保留每组最高音。")
         if result.conversion.octave_folding_detected:
             print("检测到音域外音符：已移动到最近的可演奏八度。")
         return 0
