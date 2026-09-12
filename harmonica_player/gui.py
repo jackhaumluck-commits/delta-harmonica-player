@@ -16,7 +16,11 @@ from typing import Any, Callable
 from . import __version__
 from .hotkeys import Hotkey, HotkeyBindings, WindowsHotkeyListener
 from .library import SongSummary, import_song, list_songs
-from .midi_import import MidiImportError, import_midi, list_midi_tracks
+from .midi_import import (
+    MidiImportError,
+    import_midi_with_details,
+    list_midi_tracks,
+)
 from .playback import (
     PauseToggleResult,
     PlaybackOutput,
@@ -55,7 +59,8 @@ _TUTORIAL_SECTIONS = (
     (
         "2. 导入 MIDI",
         "点击“导入 MIDI”，选择 .mid 或 .midi 文件。"
-        "如果文件包含多个可演奏轨道，程序会请你选择其中一个。",
+        "如果文件包含多个可演奏轨道，程序会请你选择其中一个；"
+        "轨道内出现和弦时会自动保留每个时刻的最高音作为主旋律。",
     ),
     (
         "3. 选择模式并开始",
@@ -834,14 +839,17 @@ class HarmonicaPlayerApp:
                 if selected not in valid_indexes:
                     raise MidiImportError(f"MIDI 轨道 {selected} 中没有音符")
                 track_index = selected
-            imported = import_midi(path, track_index=track_index)
+            result = import_midi_with_details(path, track_index=track_index)
         except Exception as error:
             self._messagebox.showerror(
                 "MIDI 导入失败", str(error), parent=self._root
             )
             self._append_log(f"MIDI 导入失败：{error}")
             return
-        self._finish_import(imported)
+        detail = None
+        if result.conversion.polyphony_detected:
+            detail = "检测到和弦，已自动保留每个时刻的最高音作为主旋律。"
+        self._finish_import(result.summary, detail=detail)
 
     def _show_tutorial(self) -> None:
         """Open a concise guide for importing songs and starting playback."""
@@ -926,12 +934,18 @@ class HarmonicaPlayerApp:
         window.grab_set()
         window.focus_force()
 
-    def _finish_import(self, imported: SongSummary) -> None:
+    def _finish_import(
+        self, imported: SongSummary, *, detail: str | None = None
+    ) -> None:
         self._refresh_songs(imported.path)
         self._append_log(f"已导入：{imported.display_name}")
+        message = f"已加入用户曲库：{imported.display_name}"
+        if detail is not None:
+            self._append_log(detail)
+            message += f"\n\n{detail}"
         self._messagebox.showinfo(
             "导入成功",
-            f"已加入用户曲库：{imported.display_name}",
+            message,
             parent=self._root,
         )
 

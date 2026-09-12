@@ -174,19 +174,21 @@ def main() -> int:
             or args.real_input
         ):
             parser.error("--import-midi 不能和曲谱或播放选项同时使用")
-        from .midi_import import MidiImportError, import_midi
+        from .midi_import import MidiImportError, import_midi_with_details
 
         try:
-            imported = import_midi(
+            result = import_midi_with_details(
                 args.import_midi,
                 track_index=args.midi_track,
             )
         except (OSError, SongFormatError, SongImportError, MidiImportError) as error:
             parser.error(f"无法导入 MIDI：{error}")
         print(
-            f"已将 MIDI 转换为用户曲目：{imported.display_name} "
-            f"({imported.path.name})"
+            f"已将 MIDI 转换为用户曲目：{result.summary.display_name} "
+            f"({result.summary.path.name})"
         )
+        if result.conversion.polyphony_detected:
+            print("检测到和弦：已保留每个时刻的最高音作为主旋律。")
         return 0
 
     if args.list_songs:

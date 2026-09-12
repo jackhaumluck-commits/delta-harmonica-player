@@ -46,6 +46,15 @@ class MidiConversion:
     song: Song
     track_index: int
     track_name: str | None
+    polyphony_detected: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class MidiImportResult:
+    """Imported score together with details about lossy MIDI conversion."""
+
+    summary: SongSummary
+    conversion: MidiConversion
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,13 +68,6 @@ class MidiTrackSummary:
     @property
     def display_name(self) -> str:
         return self.name or f"轨道 {self.index}"
-
-
-@dataclass(frozen=True, slots=True)
-class _ActiveNote:
-    pitch: int
-    channel: int
-    start_tick: int
 
 
 def convert_midi(
@@ -83,7 +85,9 @@ def convert_midi(
 
     selected_index = _select_track(midi, track_index)
     tempo = _constant_tempo(midi)
-    events = _convert_track(midi.tracks[selected_index], midi.ticks_per_beat)
+    events, polyphony_detected = _convert_track(
+        midi.tracks[selected_index], midi.ticks_per_beat
+    )
     title = source_path.stem.replace("#", "＃").strip() or "MIDI 导入曲目"
     track_name = midi.tracks[selected_index].name.strip() or None
     return MidiConversion(
@@ -94,6 +98,7 @@ def convert_midi(
         ),
         track_index=selected_index,
         track_name=track_name,
+        polyphony_detected=polyphony_detected,
     )
 
 
@@ -120,14 +125,34 @@ def import_midi(
 ) -> SongSummary:
     """Convert a MIDI file and store the result in the user song library."""
 
+    return import_midi_with_details(
+        source_path,
+        track_index=track_index,
+        bundled_directory=bundled_directory,
+        user_directory=user_directory,
+    ).summary
+
+
+def import_midi_with_details(
+    source_path: Path,
+    *,
+    track_index: int | None = None,
+    bundled_directory: Path = DEFAULT_SONG_DIRECTORY,
+    user_directory: Path = DEFAULT_USER_SONG_DIRECTORY,
+) -> MidiImportResult:
+    """Import MIDI and retain details needed for clear user feedback."""
+
     source_path = Path(source_path)
     conversion = convert_midi(source_path, track_index=track_index)
     text = format_midi_song(conversion)
-    return save_user_song(
-        text,
-        source_path.stem,
-        bundled_directory=bundled_directory,
-        user_directory=user_directory,
+    return MidiImportResult(
+        summary=save_user_song(
+            text,
+            source_path.stem,
+            bundled_directory=bundled_directory,
+            user_directory=user_directory,
+        ),
+        conversion=conversion,
     )
 
 
@@ -140,10 +165,16 @@ def format_midi_song(conversion: MidiConversion) -> str:
     lines = [
         "# 由 MIDI 导入生成，可按需要手动修改",
         f"# MIDI 轨道：{track_description}",
-        f"bpm {_format_number(conversion.song.bpm)}",
-        f"title {conversion.song.title}",
-        "",
     ]
+    if conversion.polyphony_detected:
+        lines.append("# 和弦处理：已保留每个时刻的最高音作为单旋律")
+    lines.extend(
+        [
+            f"bpm {_format_number(conversion.song.bpm)}",
+            f"title {conversion.song.title}",
+            "",
+        ]
+    )
     lines.extend(
         f"{event.note} {_format_number(event.beats)} {event.modifier}"
         for event in conversion.song.events
@@ -222,7 +253,9 @@ def _constant_tempo(midi: MidiFile) -> int:
     return tempo
 
 
-def _convert_track(track: object, ticks_per_beat: int) -> tuple[NoteEvent, ...]:
+def _convert_track(
+    track: object, ticks_per_beat: int
+) -> tuple[tuple[NoteEvent, ...], bool]:
     messages_by_tick: dict[int, list[object]] = defaultdict(list)
     absolute_tick = 0
     for message in track:
@@ -231,58 +264,103 @@ def _convert_track(track: object, ticks_per_beat: int) -> tuple[NoteEvent, ...]:
             messages_by_tick[absolute_tick].append(message)
 
     events: list[NoteEvent] = []
-    active: _ActiveNote | None = None
-    last_end_tick = 0
+    active: dict[tuple[int, int], int] = {}
+    last_tick = 0
+    interval_starts_new_event = True
+    polyphony_detected = False
     for tick in sorted(messages_by_tick):
         messages = messages_by_tick[tick]
-        ending = [message for message in messages if _is_note_end(message)]
-        starting = [message for message in messages if _is_note_start(message)]
+        selected_before = _highest_active_pitch(active)
+        if tick > last_tick:
+            _append_interval(
+                events,
+                selected_before,
+                tick - last_tick,
+                ticks_per_beat,
+                starts_new_event=interval_starts_new_event,
+            )
 
-        for message in ending:
-            if active is None:
-                raise MidiImportError(
-                    f"tick {tick} 的 {_pitch_name(message.note)} 缺少对应的开始事件"
-                )
-            if (message.note, message.channel) != (active.pitch, active.channel):
-                raise MidiImportError("首版 MIDI 导入只支持一次演奏一个音符，不支持和弦")
-            duration_ticks = tick - active.start_tick
-            if duration_ticks <= 0:
-                raise MidiImportError(
-                    f"MIDI 音符 {_pitch_name(active.pitch)} 的持续时间必须大于零"
-                )
-            if active.start_tick > last_end_tick:
-                events.append(
-                    NoteEvent(
-                        note="0",
-                        beats=(active.start_tick - last_end_tick) / ticks_per_beat,
-                        modifier="rest",
+        started_pitches: set[int] = set()
+        for message in messages:
+            key = (message.note, message.channel)
+            if _is_note_end(message):
+                try:
+                    start_tick = active.pop(key)
+                except KeyError as error:
+                    raise MidiImportError(
+                        f"tick {tick} 的 {_pitch_name(message.note)} "
+                        "缺少对应的开始事件"
+                    ) from error
+                if tick <= start_tick:
+                    raise MidiImportError(
+                        f"MIDI 音符 {_pitch_name(message.note)} "
+                        "的持续时间必须大于零"
                     )
-                )
-            events.append(
-                midi_pitch_to_event(
-                    active.pitch,
-                    duration_ticks / ticks_per_beat,
-                )
-            )
-            last_end_tick = tick
-            active = None
+                continue
 
-        for message in starting:
-            if active is not None:
-                raise MidiImportError("首版 MIDI 导入只支持一次演奏一个音符，不支持和弦")
-            active = _ActiveNote(
-                pitch=message.note,
-                channel=message.channel,
-                start_tick=tick,
-            )
+            if key in active:
+                raise MidiImportError(
+                    f"tick {tick} 的 {_pitch_name(message.note)} "
+                    "存在重复的开始事件"
+                )
+            active[key] = tick
+            started_pitches.add(message.note)
+            if len(active) > 1:
+                polyphony_detected = True
 
-    if active is not None:
+        selected_after = _highest_active_pitch(active)
+        interval_starts_new_event = (
+            selected_after != selected_before
+            or selected_after in started_pitches
+        )
+        last_tick = tick
+
+    if active:
+        (pitch, _channel), _start_tick = min(
+            active.items(), key=lambda item: item[1]
+        )
         raise MidiImportError(
-            f"MIDI 音符 {_pitch_name(active.pitch)} 缺少对应的结束事件"
+            f"MIDI 音符 {_pitch_name(pitch)} 缺少对应的结束事件"
         )
     if not events:
         raise MidiImportError("所选 MIDI 轨道中没有可转换的完整音符")
-    return tuple(events)
+    return tuple(events), polyphony_detected
+
+
+def _highest_active_pitch(active: dict[tuple[int, int], int]) -> int | None:
+    if not active:
+        return None
+    return max(pitch for pitch, _channel in active)
+
+
+def _append_interval(
+    events: list[NoteEvent],
+    pitch: int | None,
+    duration_ticks: int,
+    ticks_per_beat: int,
+    *,
+    starts_new_event: bool,
+) -> None:
+    beats = duration_ticks / ticks_per_beat
+    event = (
+        NoteEvent(note="0", beats=beats, modifier="rest")
+        if pitch is None
+        else midi_pitch_to_event(pitch, beats)
+    )
+    if (
+        not starts_new_event
+        and events
+        and (events[-1].note, events[-1].modifier)
+        == (event.note, event.modifier)
+    ):
+        previous = events[-1]
+        events[-1] = NoteEvent(
+            note=previous.note,
+            beats=previous.beats + event.beats,
+            modifier=previous.modifier,
+        )
+        return
+    events.append(event)
 
 
 def _pitch_mapping() -> dict[int, tuple[str, str]]:

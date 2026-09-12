@@ -138,7 +138,7 @@ class MidiImportTests(unittest.TestCase):
             with self.assertRaisesRegex(MidiImportError, "没有音符"):
                 convert_midi(path, track_index=0)
 
-    def test_rejects_chords(self) -> None:
+    def test_extracts_highest_note_from_chords(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             path = Path(temporary_directory) / "chord.mid"
             midi = MidiFile(ticks_per_beat=480)
@@ -153,8 +153,89 @@ class MidiImportTests(unittest.TestCase):
             midi.tracks.append(track)
             midi.save(path)
 
-            with self.assertRaisesRegex(MidiImportError, "不支持和弦"):
-                convert_midi(path)
+            conversion = convert_midi(path)
+
+            self.assertTrue(conversion.polyphony_detected)
+            self.assertEqual(
+                conversion.song.events,
+                (NoteEvent("3", 1.0, "normal"),),
+            )
+            self.assertIn("和弦处理", format_midi_song(conversion))
+
+    def test_tracks_highest_note_through_overlapping_notes(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            path = Path(temporary_directory) / "overlap.mid"
+            midi = MidiFile(ticks_per_beat=480)
+            track = MidiTrack(
+                [
+                    Message("note_on", note=60, velocity=64, time=0),
+                    Message("note_on", note=67, velocity=64, time=240),
+                    Message("note_off", note=67, velocity=0, time=240),
+                    Message("note_off", note=60, velocity=0, time=240),
+                ]
+            )
+            midi.tracks.append(track)
+            midi.save(path)
+
+            conversion = convert_midi(path)
+
+            self.assertTrue(conversion.polyphony_detected)
+            self.assertEqual(
+                conversion.song.events,
+                (
+                    NoteEvent("1", 0.5, "normal"),
+                    NoteEvent("5", 0.5, "normal"),
+                    NoteEvent("1", 0.5, "normal"),
+                ),
+            )
+
+    def test_keeps_repeated_notes_as_separate_events(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            path = Path(temporary_directory) / "repeated.mid"
+            midi = MidiFile(ticks_per_beat=480)
+            track = MidiTrack(
+                [
+                    Message("note_on", note=60, velocity=64, time=0),
+                    Message("note_off", note=60, velocity=0, time=480),
+                    Message("note_on", note=60, velocity=64, time=0),
+                    Message("note_off", note=60, velocity=0, time=480),
+                ]
+            )
+            midi.tracks.append(track)
+            midi.save(path)
+
+            conversion = convert_midi(path)
+
+            self.assertFalse(conversion.polyphony_detected)
+            self.assertEqual(
+                conversion.song.events,
+                (
+                    NoteEvent("1", 1.0, "normal"),
+                    NoteEvent("1", 1.0, "normal"),
+                ),
+            )
+
+    def test_does_not_retrigger_held_high_note_for_lower_voice_changes(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            path = Path(temporary_directory) / "held_high.mid"
+            midi = MidiFile(ticks_per_beat=480)
+            track = MidiTrack(
+                [
+                    Message("note_on", note=67, velocity=64, time=0),
+                    Message("note_on", note=60, velocity=64, time=240),
+                    Message("note_off", note=60, velocity=0, time=240),
+                    Message("note_off", note=67, velocity=0, time=240),
+                ]
+            )
+            midi.tracks.append(track)
+            midi.save(path)
+
+            conversion = convert_midi(path)
+
+            self.assertEqual(
+                conversion.song.events,
+                (NoteEvent("5", 1.5, "normal"),),
+            )
 
     def test_rejects_tempo_changes_during_playback(self) -> None:
         with TemporaryDirectory() as temporary_directory:
