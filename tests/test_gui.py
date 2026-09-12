@@ -1,11 +1,15 @@
 import queue
 import unittest
+from pathlib import Path
 
 from harmonica_player.gui import (
     GlobalHotkeyMonitor,
     QueuePlaybackOutput,
+    _song_kind_label,
+    _TUTORIAL_SECTIONS,
 )
 from harmonica_player.hotkeys import Hotkey, HotkeyBindings
+from harmonica_player.library import SongSource, SongSummary
 from harmonica_player.playback import PlaybackResult
 from harmonica_player.song import NoteEvent
 
@@ -64,5 +68,32 @@ class GlobalHotkeyMonitorTests(unittest.TestCase):
         self.assertEqual(hotkey.data, Hotkey.START)
 
 
+class GuiContentTests(unittest.TestCase):
+    def test_tutorial_covers_import_modes_and_default_hotkeys(self) -> None:
+        tutorial = "\n".join(
+            f"{title}\n{description}"
+            for title, description in _TUTORIAL_SECTIONS
+        )
+
+        self.assertIn("导入文本曲谱", tutorial)
+        self.assertIn("导入 MIDI", tutorial)
+        self.assertIn("安全预演", tutorial)
+        self.assertIn("F8 开始、F9 停止、F10 暂停或继续", tutorial)
+
+    def test_song_kind_label_uses_factual_library_categories(self) -> None:
+        song = SongSummary(
+            name="twinkle_twinkle",
+            title="小星星（第一段）",
+            path=Path("twinkle_twinkle.song"),
+            bpm=80,
+            event_count=14,
+            duration_seconds=12,
+            source=SongSource.BUNDLED,
+        )
+
+        self.assertEqual(_song_kind_label(song), "内置示例曲")
+
+
 if __name__ == "__main__":
     unittest.main()
+
