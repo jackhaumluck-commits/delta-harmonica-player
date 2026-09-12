@@ -48,6 +48,7 @@ class MidiImportTests(unittest.TestCase):
             self.assertEqual(conversion.track_name, "Melody")
             self.assertFalse(conversion.polyphony_detected)
             self.assertFalse(conversion.octave_folding_detected)
+            self.assertFalse(conversion.low_register_adjustment_detected)
             self.assertEqual(
                 [
                     (event.note, event.beats, event.modifier)
@@ -163,6 +164,30 @@ class MidiImportTests(unittest.TestCase):
                 (NoteEvent("3", 1.0, "normal"),),
             )
             self.assertIn("和弦处理", format_midi_song(conversion))
+
+    def test_raises_very_low_notes_only_for_polyphonic_midi(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            path = Path(temporary_directory) / "low_chord.mid"
+            midi = MidiFile(ticks_per_beat=480)
+            track = MidiTrack(
+                [
+                    Message("note_on", note=41, velocity=64, time=0),
+                    Message("note_on", note=48, velocity=64, time=0),
+                    Message("note_off", note=41, velocity=0, time=480),
+                    Message("note_off", note=48, velocity=0, time=0),
+                ]
+            )
+            midi.tracks.append(track)
+            midi.save(path)
+
+            conversion = convert_midi(path)
+
+            self.assertTrue(conversion.low_register_adjustment_detected)
+            self.assertEqual(
+                conversion.song.events,
+                (NoteEvent("1", 1.0, "normal"),),
+            )
+            self.assertIn("旋律优化", format_midi_song(conversion))
 
     def test_new_onset_replaces_held_note_and_preserves_timeline(self) -> None:
         with TemporaryDirectory() as temporary_directory:

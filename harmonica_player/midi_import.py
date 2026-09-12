@@ -22,6 +22,7 @@ SUPPORTED_MIDI_SUFFIXES = {".mid", ".midi"}
 _NATURAL_OFFSETS = (0, 2, 4, 5, 7, 9, 11)
 _SHARP_DEGREES = {1: 1, 3: 2, 6: 4, 8: 5, 10: 6}
 _ONSET_CLUSTER_BEATS = 1 / 16
+_POLYPHONIC_MELODY_FLOOR = 55  # G3
 _PITCH_NAMES = (
     "C",
     "C#",
@@ -49,6 +50,7 @@ class MidiConversion:
     track_name: str | None
     polyphony_detected: bool = False
     octave_folding_detected: bool = False
+    low_register_adjustment_detected: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,9 +98,12 @@ def convert_midi(
 
     selected_index = _select_track(midi, track_index)
     tempo = _constant_tempo(midi)
-    events, polyphony_detected, octave_folding_detected = _convert_track(
-        midi.tracks[selected_index], midi.ticks_per_beat
-    )
+    (
+        events,
+        polyphony_detected,
+        octave_folding_detected,
+        low_register_adjustment_detected,
+    ) = _convert_track(midi.tracks[selected_index], midi.ticks_per_beat)
     title = source_path.stem.replace("#", "＃").strip() or "MIDI 导入曲目"
     track_name = midi.tracks[selected_index].name.strip() or None
     return MidiConversion(
@@ -111,6 +116,7 @@ def convert_midi(
         track_name=track_name,
         polyphony_detected=polyphony_detected,
         octave_folding_detected=octave_folding_detected,
+        low_register_adjustment_detected=low_register_adjustment_detected,
     )
 
 
@@ -182,6 +188,8 @@ def format_midi_song(conversion: MidiConversion) -> str:
         lines.append("# 和弦处理：已按相近起奏时间分组并保留每组最高音")
     if conversion.octave_folding_detected:
         lines.append("# 音域处理：已将无法直接演奏的音移入最近的可用八度")
+    if conversion.low_register_adjustment_detected:
+        lines.append("# 旋律优化：已将多声部中的部分过低伴奏音上移八度")
     lines.extend(
         [
             f"bpm {_format_number(conversion.song.bpm)}",
@@ -264,11 +272,12 @@ def _constant_tempo(midi: MidiFile) -> int:
 
 def _convert_track(
     track: object, ticks_per_beat: int
-) -> tuple[tuple[NoteEvent, ...], bool, bool]:
+) -> tuple[tuple[NoteEvent, ...], bool, bool, bool]:
     notes, polyphony_detected = _collect_notes(track)
     clusters = _cluster_note_onsets(notes, ticks_per_beat)
     events: list[NoteEvent] = []
     octave_folding_detected = False
+    low_register_adjustment_detected = False
     cursor_tick = 0
 
     for index, cluster in enumerate(clusters):
@@ -300,9 +309,16 @@ def _convert_track(
             continue
 
         beats = (end_tick - cluster_start) / ticks_per_beat
+        selected_pitch = selected.pitch
+        if polyphony_detected:
+            selected_pitch, adjusted = _raise_low_polyphonic_pitch(
+                selected_pitch
+            )
+            low_register_adjustment_detected |= adjusted
+
         mapping = _pitch_mapping()
         playable_pitch, folded = _nearest_playable_pitch(
-            selected.pitch, mapping
+            selected_pitch, mapping
         )
         note, modifier = mapping[playable_pitch]
         events.append(NoteEvent(note=note, beats=beats, modifier=modifier))
@@ -321,7 +337,12 @@ def _convert_track(
 
     if not events or all(event.is_rest for event in events):
         raise MidiImportError("所选 MIDI 轨道中没有可转换的完整音符")
-    return tuple(events), polyphony_detected, octave_folding_detected
+    return (
+        tuple(events),
+        polyphony_detected,
+        octave_folding_detected,
+        low_register_adjustment_detected,
+    )
 
 
 def _collect_notes(track: object) -> tuple[tuple[_MidiNote, ...], bool]:
@@ -412,6 +433,14 @@ def _nearest_playable_pitch(
         key=lambda playable_pitch: abs(playable_pitch - pitch),
     )
     return nearest, True
+
+
+def _raise_low_polyphonic_pitch(pitch: int) -> tuple[int, bool]:
+    if pitch >= _POLYPHONIC_MELODY_FLOOR:
+        return pitch, False
+    while pitch < _POLYPHONIC_MELODY_FLOOR:
+        pitch += 12
+    return pitch, True
 
 
 def _pitch_mapping() -> dict[int, tuple[str, str]]:
