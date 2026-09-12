@@ -2,4 +2,6 @@
 
 from .song import NoteEvent, Song, SongFormatError, parse_song
 
-__all__ = ["NoteEvent", "Song", "SongFormatError", "parse_song"]
+__version__ = "1.0.0.dev0"
+
+__all__ = ["NoteEvent", "Song", "SongFormatError", "parse_song", "__version__"]

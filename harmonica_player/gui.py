@@ -13,6 +13,7 @@ from pathlib import Path
 from threading import Event, Thread
 from typing import Any, Callable
 
+from . import __version__
 from .hotkeys import Hotkey, HotkeyBindings, WindowsHotkeyListener
 from .library import SongSummary, import_song, list_songs
 from .midi_import import MidiImportError, import_midi, list_midi_tracks
@@ -364,7 +365,10 @@ class HarmonicaPlayerApp:
         tk = self._tk
         self._configure_styles()
 
-        root.title("口琴自动演奏器 v0.9")
+        version_label = f"v{__version__.split('.dev', 1)[0]}"
+        if ".dev" in __version__:
+            version_label += " 开发版"
+        root.title(f"口琴自动演奏器 {version_label}")
         root.geometry("1180x840")
         root.minsize(1000, 740)
         root.configure(background=_COLORS["background"])
@@ -393,7 +397,7 @@ class HarmonicaPlayerApp:
         status_area.pack(side="right")
         tk.Label(
             status_area,
-            text="v0.9",
+            text=version_label,
             background=_COLORS["surface_high"],
             foreground=_COLORS["muted"],
             padx=10,

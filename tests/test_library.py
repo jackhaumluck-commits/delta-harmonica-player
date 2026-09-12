@@ -8,6 +8,7 @@ from harmonica_player.library import (
     SongSource,
     import_song,
     list_songs,
+    migrate_legacy_user_songs,
     select_song_path,
 )
 from harmonica_player.song import SongFormatError
@@ -137,6 +138,41 @@ class SongLibraryTests(unittest.TestCase):
 
             with self.assertRaisesRegex(SongFormatError, "broken.song"):
                 list_songs(EXAMPLES_DIRECTORY, user_directory)
+
+    def test_migrates_legacy_user_scores_without_overwriting(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            legacy_directory = root / "legacy"
+            user_directory = root / "current"
+            legacy_directory.mkdir()
+            user_directory.mkdir()
+            (legacy_directory / "old.song").write_text(
+                "bpm 90\n1 1 normal\n", encoding="utf-8"
+            )
+            (legacy_directory / "existing.song").write_text(
+                "bpm 80\n1 1 normal\n", encoding="utf-8"
+            )
+            existing = user_directory / "existing.song"
+            existing.write_text("bpm 120\n2 1 normal\n", encoding="utf-8")
+
+            migrated = migrate_legacy_user_songs(
+                legacy_directory, user_directory
+            )
+
+            self.assertEqual(migrated, (user_directory / "old.song",))
+            self.assertEqual(
+                (user_directory / "old.song").read_text(encoding="utf-8"),
+                "bpm 90\n1 1 normal\n",
+            )
+            self.assertEqual(
+                existing.read_text(encoding="utf-8"),
+                "bpm 120\n2 1 normal\n",
+            )
+            (user_directory / "old.song").unlink()
+            self.assertEqual(
+                migrate_legacy_user_songs(legacy_directory, user_directory), ()
+            )
+            self.assertFalse((user_directory / "old.song").exists())
 
 
 if __name__ == "__main__":

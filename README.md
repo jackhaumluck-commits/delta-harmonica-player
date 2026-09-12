@@ -1,6 +1,6 @@
 # 三角洲口琴自动演奏器（学习项目）
 
-这是一个用 Python 编写的口琴曲谱播放器。当前版本是 v0.9.0，加入了可视化桌面界面，可以直接选择曲目、查看信息、导入曲谱或 MIDI、设置热键并控制播放；原有命令行功能仍然保留。
+这是一个用 Python 编写的口琴曲谱播放器。当前正在开发 v1.0，已有可视化桌面界面，可以直接选择曲目、查看信息、导入曲谱或 MIDI、设置热键并控制播放；原有命令行功能仍然保留。
 
 > 默认模式不会发送真实输入。只有使用 `--real-input` 才会向当前前台窗口发送 Windows 键鼠事件。游戏对第三方自动化程序可能有处罚，请在用于游戏前确认当时有效的官方规则并自行评估账号风险。本项目不会读取、修改或注入游戏进程，也不会实现反作弊绕过。
 
@@ -67,7 +67,7 @@ python -m pip install -e .
 
 ### 桌面界面（推荐）
 
-启动 v0.9 桌面界面：
+启动桌面界面：
 
 ```powershell
 python -X utf8 -m harmonica_player --gui
@@ -115,7 +115,7 @@ python -X utf8 -m harmonica_player --import-song examples/user_song_template.txt
 
 上面的命令使用项目附带的导入示例；以后只需将路径换成自己的曲谱文件。
 
-导入成功后，曲谱会以 `.song` 文件保存在项目的 `songs` 文件夹中，并可以通过文件名或中文标题选择：
+导入成功后，曲谱会以 `.song` 文件保存在当前 Windows 用户的 `%LOCALAPPDATA%\DeltaHarmonicaPlayer\songs` 文件夹中，并可以通过文件名或中文标题选择。首次运行 v1.0 时，程序也会自动复制旧版项目 `songs` 文件夹中的曲谱，且不会覆盖同名文件：
 
 ```powershell
 python -X utf8 -m harmonica_player --song "我的曲子"

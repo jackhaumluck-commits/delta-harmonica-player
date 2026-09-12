@@ -23,7 +23,7 @@ def main() -> int:
     parser.add_argument(
         "--gui",
         action="store_true",
-        help="打开 v0.9 桌面界面",
+        help="打开桌面界面",
     )
     parser.add_argument(
         "--song",
