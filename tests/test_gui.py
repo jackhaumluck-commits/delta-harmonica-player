@@ -80,6 +80,7 @@ class GuiContentTests(unittest.TestCase):
         self.assertIn("最高音", tutorial)
         self.assertIn("更合适的八度", tutorial)
         self.assertIn("过低的伴奏音", tutorial)
+        self.assertIn("过密音符", tutorial)
         self.assertIn("安全预演", tutorial)
         self.assertIn("F8 开始、F9 停止、F10 暂停或继续", tutorial)
 

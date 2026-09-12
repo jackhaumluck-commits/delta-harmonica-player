@@ -193,6 +193,8 @@ def main() -> int:
             print("检测到音域外音符：已移动到最近的可演奏八度。")
         if result.conversion.low_register_adjustment_detected:
             print("旋律优化：已将多声部中的部分过低伴奏音上移八度。")
+        if result.conversion.timing_adjustment_detected:
+            print("输入优化：相邻音至少间隔 0.10 秒，并预留 0.02 秒松键空隙。")
         return 0
 
     if args.list_songs:

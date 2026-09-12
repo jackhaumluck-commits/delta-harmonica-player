@@ -49,6 +49,7 @@ class MidiImportTests(unittest.TestCase):
             self.assertFalse(conversion.polyphony_detected)
             self.assertFalse(conversion.octave_folding_detected)
             self.assertFalse(conversion.low_register_adjustment_detected)
+            self.assertTrue(conversion.timing_adjustment_detected)
             self.assertEqual(
                 [
                     (event.note, event.beats, event.modifier)
@@ -56,14 +57,27 @@ class MidiImportTests(unittest.TestCase):
                 ],
                 [
                     ("0", 0.5, "rest"),
-                    ("1", 1.0, "down"),
-                    ("1", 0.5, "normal"),
-                    ("1", 0.5, "semitone"),
+                    ("1", 29 / 30, "down"),
+                    ("0", 1 / 30, "rest"),
+                    ("1", 7 / 15, "normal"),
+                    ("0", 1 / 30, "rest"),
+                    ("1", 7 / 15, "semitone"),
+                    ("0", 1 / 30, "rest"),
                     ("8", 1.0, "up"),
                 ],
             )
             reparsed = parse_song(format_midi_song(conversion))
-            self.assertEqual(reparsed, conversion.song)
+            self.assertEqual(reparsed.bpm, conversion.song.bpm)
+            self.assertEqual(reparsed.title, conversion.song.title)
+            self.assertEqual(len(reparsed.events), len(conversion.song.events))
+            for reparsed_event, original_event in zip(
+                reparsed.events, conversion.song.events
+            ):
+                self.assertEqual(reparsed_event.note, original_event.note)
+                self.assertEqual(reparsed_event.modifier, original_event.modifier)
+                self.assertAlmostEqual(
+                    reparsed_event.beats, original_event.beats, places=5
+                )
 
     def test_imports_generated_score_into_user_library(self) -> None:
         with TemporaryDirectory() as temporary_directory:
@@ -189,6 +203,37 @@ class MidiImportTests(unittest.TestCase):
             )
             self.assertIn("旋律优化", format_midi_song(conversion))
 
+    def test_limits_dense_notes_and_preserves_the_timeline(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            path = Path(temporary_directory) / "dense.mid"
+            midi = MidiFile(ticks_per_beat=480)
+            track = MidiTrack(
+                [
+                    Message("note_on", note=60, velocity=64, time=0),
+                    Message("note_off", note=60, velocity=0, time=30),
+                    Message("note_on", note=62, velocity=64, time=18),
+                    Message("note_off", note=62, velocity=0, time=30),
+                    Message("note_on", note=64, velocity=64, time=66),
+                    Message("note_off", note=64, velocity=0, time=96),
+                ]
+            )
+            midi.tracks.append(track)
+            midi.save(path)
+
+            conversion = convert_midi(path)
+
+            self.assertTrue(conversion.timing_adjustment_detected)
+            self.assertEqual(
+                conversion.song.events,
+                (
+                    NoteEvent("1", 76 / 480, "normal"),
+                    NoteEvent("0", 68 / 480, "rest"),
+                    NoteEvent("3", 96 / 480, "normal"),
+                ),
+            )
+            self.assertAlmostEqual(conversion.song.duration_seconds, 0.25)
+            self.assertIn("相邻音至少间隔 0.10 秒", format_midi_song(conversion))
+
     def test_new_onset_replaces_held_note_and_preserves_timeline(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             path = Path(temporary_directory) / "overlap.mid"
@@ -210,7 +255,8 @@ class MidiImportTests(unittest.TestCase):
             self.assertEqual(
                 conversion.song.events,
                 (
-                    NoteEvent("1", 0.5, "normal"),
+                    NoteEvent("1", 11 / 24, "normal"),
+                    NoteEvent("0", 1 / 24, "rest"),
                     NoteEvent("5", 0.5, "normal"),
                     NoteEvent("0", 0.5, "rest"),
                 ),
@@ -237,7 +283,8 @@ class MidiImportTests(unittest.TestCase):
             self.assertEqual(
                 conversion.song.events,
                 (
-                    NoteEvent("1", 1.0, "normal"),
+                    NoteEvent("1", 23 / 24, "normal"),
+                    NoteEvent("0", 1 / 24, "rest"),
                     NoteEvent("1", 1.0, "normal"),
                 ),
             )
@@ -262,7 +309,8 @@ class MidiImportTests(unittest.TestCase):
             self.assertEqual(
                 conversion.song.events,
                 (
-                    NoteEvent("5", 0.5, "normal"),
+                    NoteEvent("5", 11 / 24, "normal"),
+                    NoteEvent("0", 1 / 24, "rest"),
                     NoteEvent("1", 0.5, "normal"),
                     NoteEvent("0", 0.5, "rest"),
                 ),

@@ -61,7 +61,8 @@ _TUTORIAL_SECTIONS = (
         "点击“导入 MIDI”，选择 .mid 或 .midi 文件。"
         "如果文件包含多个可演奏轨道，程序会请你选择其中一个；"
         "相近起奏的和弦音会合并成一组并保留每组最高音，"
-        "过低的伴奏音和音域外音符会移动到更合适的八度。",
+        "过低的伴奏音和音域外音符会移动到更合适的八度。"
+        "过密音符会自动精简，并为按键松开留出短暂空隙。",
     ),
     (
         "3. 选择模式并开始",
@@ -859,6 +860,10 @@ class HarmonicaPlayerApp:
         if result.conversion.low_register_adjustment_detected:
             details.append(
                 "已将多声部中的部分过低伴奏音上移八度，以突出主旋律。"
+            )
+        if result.conversion.timing_adjustment_detected:
+            details.append(
+                "已限制相邻音至少间隔 0.10 秒，并预留 0.02 秒松键空隙。"
             )
         self._finish_import(
             result.summary,

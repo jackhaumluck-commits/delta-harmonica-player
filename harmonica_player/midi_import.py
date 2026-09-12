@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
+from math import ceil
 from pathlib import Path
 
 from mido import MidiFile, merge_tracks
@@ -23,6 +24,8 @@ _NATURAL_OFFSETS = (0, 2, 4, 5, 7, 9, 11)
 _SHARP_DEGREES = {1: 1, 3: 2, 6: 4, 8: 5, 10: 6}
 _ONSET_CLUSTER_BEATS = 1 / 16
 _POLYPHONIC_MELODY_FLOOR = 55  # G3
+_MIN_NOTE_INTERVAL_SECONDS = 0.10
+_NOTE_RELEASE_GAP_SECONDS = 0.02
 _PITCH_NAMES = (
     "C",
     "C#",
@@ -51,6 +54,7 @@ class MidiConversion:
     polyphony_detected: bool = False
     octave_folding_detected: bool = False
     low_register_adjustment_detected: bool = False
+    timing_adjustment_detected: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,7 +107,10 @@ def convert_midi(
         polyphony_detected,
         octave_folding_detected,
         low_register_adjustment_detected,
-    ) = _convert_track(midi.tracks[selected_index], midi.ticks_per_beat)
+        timing_adjustment_detected,
+    ) = _convert_track(
+        midi.tracks[selected_index], midi.ticks_per_beat, tempo
+    )
     title = source_path.stem.replace("#", "＃").strip() or "MIDI 导入曲目"
     track_name = midi.tracks[selected_index].name.strip() or None
     return MidiConversion(
@@ -117,6 +124,7 @@ def convert_midi(
         polyphony_detected=polyphony_detected,
         octave_folding_detected=octave_folding_detected,
         low_register_adjustment_detected=low_register_adjustment_detected,
+        timing_adjustment_detected=timing_adjustment_detected,
     )
 
 
@@ -190,6 +198,10 @@ def format_midi_song(conversion: MidiConversion) -> str:
         lines.append("# 音域处理：已将无法直接演奏的音移入最近的可用八度")
     if conversion.low_register_adjustment_detected:
         lines.append("# 旋律优化：已将多声部中的部分过低伴奏音上移八度")
+    if conversion.timing_adjustment_detected:
+        lines.append(
+            "# 输入优化：相邻音至少间隔 0.10 秒，并预留 0.02 秒松键空隙"
+        )
     lines.extend(
         [
             f"bpm {_format_number(conversion.song.bpm)}",
@@ -271,10 +283,19 @@ def _constant_tempo(midi: MidiFile) -> int:
 
 
 def _convert_track(
-    track: object, ticks_per_beat: int
-) -> tuple[tuple[NoteEvent, ...], bool, bool, bool]:
+    track: object, ticks_per_beat: int, tempo: int
+) -> tuple[tuple[NoteEvent, ...], bool, bool, bool, bool]:
     notes, polyphony_detected = _collect_notes(track)
     clusters = _cluster_note_onsets(notes, ticks_per_beat)
+    minimum_interval_ticks = _seconds_to_ticks(
+        _MIN_NOTE_INTERVAL_SECONDS, ticks_per_beat, tempo
+    )
+    release_gap_ticks = _seconds_to_ticks(
+        _NOTE_RELEASE_GAP_SECONDS, ticks_per_beat, tempo
+    )
+    clusters, timing_adjustment_detected = _space_note_onsets(
+        clusters, minimum_interval_ticks
+    )
     events: list[NoteEvent] = []
     octave_folding_detected = False
     low_register_adjustment_detected = False
@@ -305,6 +326,17 @@ def _convert_track(
             else selected.end_tick
         )
         end_tick = min(selected.end_tick, next_start)
+        if index + 1 < len(clusters):
+            latest_end_tick = next_start - release_gap_ticks
+            minimum_end_tick = min(
+                cluster_start + minimum_interval_ticks - release_gap_ticks,
+                latest_end_tick,
+            )
+            adjusted_end_tick = min(
+                max(end_tick, minimum_end_tick), latest_end_tick
+            )
+            timing_adjustment_detected |= adjusted_end_tick != end_tick
+            end_tick = adjusted_end_tick
         if end_tick <= cluster_start:
             continue
 
@@ -342,6 +374,7 @@ def _convert_track(
         polyphony_detected,
         octave_folding_detected,
         low_register_adjustment_detected,
+        timing_adjustment_detected,
     )
 
 
@@ -415,6 +448,34 @@ def _cluster_note_onsets(
         else:
             clusters[-1].append(note)
     return tuple(tuple(cluster) for cluster in clusters)
+
+
+def _space_note_onsets(
+    clusters: tuple[tuple[_MidiNote, ...], ...], minimum_interval_ticks: int
+) -> tuple[tuple[tuple[_MidiNote, ...], ...], bool]:
+    """Keep the first onset in each minimum interval for stable game input."""
+
+    kept: list[tuple[_MidiNote, ...]] = []
+    last_kept_start: int | None = None
+    adjustment_detected = False
+    for cluster in clusters:
+        start_tick = cluster[0].start_tick
+        if (
+            last_kept_start is not None
+            and start_tick - last_kept_start < minimum_interval_ticks
+        ):
+            adjustment_detected = True
+            continue
+        kept.append(cluster)
+        last_kept_start = start_tick
+    return tuple(kept), adjustment_detected
+
+
+def _seconds_to_ticks(
+    seconds: float, ticks_per_beat: int, tempo: int
+) -> int:
+    ticks = seconds * 1_000_000 * ticks_per_beat / tempo
+    return max(1, ceil(ticks))
 
 
 def _nearest_playable_pitch(
