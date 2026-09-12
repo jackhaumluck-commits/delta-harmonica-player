@@ -1,10 +1,13 @@
 import json
+import os
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from harmonica_player.settings import (
     GuiSettings,
+    default_settings_path,
     load_gui_settings,
     save_gui_settings,
 )
@@ -50,6 +53,18 @@ class GuiSettingsTests(unittest.TestCase):
             with self.subTest(value=value):
                 with self.assertRaisesRegex(ValueError, "0 到 30"):
                     GuiSettings(countdown_seconds=value)  # type: ignore[arg-type]
+
+    def test_default_path_uses_local_application_data(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            with patch.dict(
+                os.environ, {"LOCALAPPDATA": temporary_directory}
+            ):
+                self.assertEqual(
+                    default_settings_path(),
+                    Path(temporary_directory)
+                    / "DeltaHarmonicaPlayer"
+                    / "settings.json",
+                )
 
 
 if __name__ == "__main__":

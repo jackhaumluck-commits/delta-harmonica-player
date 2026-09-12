@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
+from math import ceil
 from pathlib import Path
 
 from mido import MidiFile, merge_tracks
@@ -21,6 +22,10 @@ DEFAULT_TEMPO = 500_000
 SUPPORTED_MIDI_SUFFIXES = {".mid", ".midi"}
 _NATURAL_OFFSETS = (0, 2, 4, 5, 7, 9, 11)
 _SHARP_DEGREES = {1: 1, 3: 2, 6: 4, 8: 5, 10: 6}
+_ONSET_CLUSTER_BEATS = 1 / 16
+_POLYPHONIC_MELODY_FLOOR = 55  # G3
+_MIN_NOTE_INTERVAL_SECONDS = 0.10
+_NOTE_RELEASE_GAP_SECONDS = 0.02
 _PITCH_NAMES = (
     "C",
     "C#",
@@ -46,6 +51,18 @@ class MidiConversion:
     song: Song
     track_index: int
     track_name: str | None
+    polyphony_detected: bool = False
+    octave_folding_detected: bool = False
+    low_register_adjustment_detected: bool = False
+    timing_adjustment_detected: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class MidiImportResult:
+    """Imported score together with details about lossy MIDI conversion."""
+
+    summary: SongSummary
+    conversion: MidiConversion
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,10 +79,12 @@ class MidiTrackSummary:
 
 
 @dataclass(frozen=True, slots=True)
-class _ActiveNote:
+class _MidiNote:
+    start_tick: int
+    end_tick: int
     pitch: int
     channel: int
-    start_tick: int
+    velocity: int
 
 
 def convert_midi(
@@ -83,7 +102,15 @@ def convert_midi(
 
     selected_index = _select_track(midi, track_index)
     tempo = _constant_tempo(midi)
-    events = _convert_track(midi.tracks[selected_index], midi.ticks_per_beat)
+    (
+        events,
+        polyphony_detected,
+        octave_folding_detected,
+        low_register_adjustment_detected,
+        timing_adjustment_detected,
+    ) = _convert_track(
+        midi.tracks[selected_index], midi.ticks_per_beat, tempo
+    )
     title = source_path.stem.replace("#", "＃").strip() or "MIDI 导入曲目"
     track_name = midi.tracks[selected_index].name.strip() or None
     return MidiConversion(
@@ -94,6 +121,10 @@ def convert_midi(
         ),
         track_index=selected_index,
         track_name=track_name,
+        polyphony_detected=polyphony_detected,
+        octave_folding_detected=octave_folding_detected,
+        low_register_adjustment_detected=low_register_adjustment_detected,
+        timing_adjustment_detected=timing_adjustment_detected,
     )
 
 
@@ -120,14 +151,34 @@ def import_midi(
 ) -> SongSummary:
     """Convert a MIDI file and store the result in the user song library."""
 
+    return import_midi_with_details(
+        source_path,
+        track_index=track_index,
+        bundled_directory=bundled_directory,
+        user_directory=user_directory,
+    ).summary
+
+
+def import_midi_with_details(
+    source_path: Path,
+    *,
+    track_index: int | None = None,
+    bundled_directory: Path = DEFAULT_SONG_DIRECTORY,
+    user_directory: Path = DEFAULT_USER_SONG_DIRECTORY,
+) -> MidiImportResult:
+    """Import MIDI and retain details needed for clear user feedback."""
+
     source_path = Path(source_path)
     conversion = convert_midi(source_path, track_index=track_index)
     text = format_midi_song(conversion)
-    return save_user_song(
-        text,
-        source_path.stem,
-        bundled_directory=bundled_directory,
-        user_directory=user_directory,
+    return MidiImportResult(
+        summary=save_user_song(
+            text,
+            source_path.stem,
+            bundled_directory=bundled_directory,
+            user_directory=user_directory,
+        ),
+        conversion=conversion,
     )
 
 
@@ -140,10 +191,24 @@ def format_midi_song(conversion: MidiConversion) -> str:
     lines = [
         "# 由 MIDI 导入生成，可按需要手动修改",
         f"# MIDI 轨道：{track_description}",
-        f"bpm {_format_number(conversion.song.bpm)}",
-        f"title {conversion.song.title}",
-        "",
     ]
+    if conversion.polyphony_detected:
+        lines.append("# 和弦处理：已按相近起奏时间分组并保留每组最高音")
+    if conversion.octave_folding_detected:
+        lines.append("# 音域处理：已将无法直接演奏的音移入最近的可用八度")
+    if conversion.low_register_adjustment_detected:
+        lines.append("# 旋律优化：已将多声部中的部分过低伴奏音上移八度")
+    if conversion.timing_adjustment_detected:
+        lines.append(
+            "# 输入优化：相邻音至少间隔 0.10 秒，并预留 0.02 秒松键空隙"
+        )
+    lines.extend(
+        [
+            f"bpm {_format_number(conversion.song.bpm)}",
+            f"title {conversion.song.title}",
+            "",
+        ]
+    )
     lines.extend(
         f"{event.note} {_format_number(event.beats)} {event.modifier}"
         for event in conversion.song.events
@@ -155,13 +220,8 @@ def midi_pitch_to_event(pitch: int, beats: float) -> NoteEvent:
     """Map a MIDI pitch to one playable key and mouse modifier."""
 
     mapping = _pitch_mapping()
-    try:
-        note, modifier = mapping[pitch]
-    except KeyError as error:
-        raise MidiImportError(
-            f"MIDI 音符 {_pitch_name(pitch)}（{pitch}）超出当前可演奏映射；"
-            "支持 C3 到 C6 的自然音，以及 C4 到 B4 的升半音"
-        ) from error
+    playable_pitch, _folded = _nearest_playable_pitch(pitch, mapping)
+    note, modifier = mapping[playable_pitch]
     return NoteEvent(note=note, beats=beats, modifier=modifier)
 
 
@@ -222,67 +282,226 @@ def _constant_tempo(midi: MidiFile) -> int:
     return tempo
 
 
-def _convert_track(track: object, ticks_per_beat: int) -> tuple[NoteEvent, ...]:
-    messages_by_tick: dict[int, list[object]] = defaultdict(list)
+def _convert_track(
+    track: object, ticks_per_beat: int, tempo: int
+) -> tuple[tuple[NoteEvent, ...], bool, bool, bool, bool]:
+    notes, polyphony_detected = _collect_notes(track)
+    clusters = _cluster_note_onsets(notes, ticks_per_beat)
+    minimum_interval_ticks = _seconds_to_ticks(
+        _MIN_NOTE_INTERVAL_SECONDS, ticks_per_beat, tempo
+    )
+    release_gap_ticks = _seconds_to_ticks(
+        _NOTE_RELEASE_GAP_SECONDS, ticks_per_beat, tempo
+    )
+    clusters, timing_adjustment_detected = _space_note_onsets(
+        clusters, minimum_interval_ticks
+    )
+    events: list[NoteEvent] = []
+    octave_folding_detected = False
+    low_register_adjustment_detected = False
+    cursor_tick = 0
+
+    for index, cluster in enumerate(clusters):
+        cluster_start = cluster[0].start_tick
+        if cluster_start > cursor_tick:
+            events.append(
+                NoteEvent(
+                    note="0",
+                    beats=(cluster_start - cursor_tick) / ticks_per_beat,
+                    modifier="rest",
+                )
+            )
+
+        selected = max(
+            cluster,
+            key=lambda note: (
+                note.pitch,
+                note.velocity,
+                note.end_tick - note.start_tick,
+            ),
+        )
+        next_start = (
+            clusters[index + 1][0].start_tick
+            if index + 1 < len(clusters)
+            else selected.end_tick
+        )
+        end_tick = min(selected.end_tick, next_start)
+        if index + 1 < len(clusters):
+            latest_end_tick = next_start - release_gap_ticks
+            minimum_end_tick = min(
+                cluster_start + minimum_interval_ticks - release_gap_ticks,
+                latest_end_tick,
+            )
+            adjusted_end_tick = min(
+                max(end_tick, minimum_end_tick), latest_end_tick
+            )
+            timing_adjustment_detected |= adjusted_end_tick != end_tick
+            end_tick = adjusted_end_tick
+        if end_tick <= cluster_start:
+            continue
+
+        beats = (end_tick - cluster_start) / ticks_per_beat
+        selected_pitch = selected.pitch
+        if polyphony_detected:
+            selected_pitch, adjusted = _raise_low_polyphonic_pitch(
+                selected_pitch
+            )
+            low_register_adjustment_detected |= adjusted
+
+        mapping = _pitch_mapping()
+        playable_pitch, folded = _nearest_playable_pitch(
+            selected_pitch, mapping
+        )
+        note, modifier = mapping[playable_pitch]
+        events.append(NoteEvent(note=note, beats=beats, modifier=modifier))
+        octave_folding_detected |= folded
+        cursor_tick = end_tick
+
+    track_end_tick = max(note.end_tick for note in notes)
+    if track_end_tick > cursor_tick:
+        events.append(
+            NoteEvent(
+                note="0",
+                beats=(track_end_tick - cursor_tick) / ticks_per_beat,
+                modifier="rest",
+            )
+        )
+
+    if not events or all(event.is_rest for event in events):
+        raise MidiImportError("所选 MIDI 轨道中没有可转换的完整音符")
+    return (
+        tuple(events),
+        polyphony_detected,
+        octave_folding_detected,
+        low_register_adjustment_detected,
+        timing_adjustment_detected,
+    )
+
+
+def _collect_notes(track: object) -> tuple[tuple[_MidiNote, ...], bool]:
+    active: dict[tuple[int, int], tuple[int, int]] = {}
+    notes: list[_MidiNote] = []
     absolute_tick = 0
+    polyphony_detected = False
     for message in track:
         absolute_tick += message.time
-        if _is_note_start(message) or _is_note_end(message):
-            messages_by_tick[absolute_tick].append(message)
-
-    events: list[NoteEvent] = []
-    active: _ActiveNote | None = None
-    last_end_tick = 0
-    for tick in sorted(messages_by_tick):
-        messages = messages_by_tick[tick]
-        ending = [message for message in messages if _is_note_end(message)]
-        starting = [message for message in messages if _is_note_start(message)]
-
-        for message in ending:
-            if active is None:
+        if _is_note_start(message):
+            key = (message.note, message.channel)
+            if key in active:
                 raise MidiImportError(
-                    f"tick {tick} 的 {_pitch_name(message.note)} 缺少对应的开始事件"
+                    f"tick {absolute_tick} 的 {_pitch_name(message.note)} "
+                    "存在重复的开始事件"
                 )
-            if (message.note, message.channel) != (active.pitch, active.channel):
-                raise MidiImportError("首版 MIDI 导入只支持一次演奏一个音符，不支持和弦")
-            duration_ticks = tick - active.start_tick
-            if duration_ticks <= 0:
-                raise MidiImportError(
-                    f"MIDI 音符 {_pitch_name(active.pitch)} 的持续时间必须大于零"
-                )
-            if active.start_tick > last_end_tick:
-                events.append(
-                    NoteEvent(
-                        note="0",
-                        beats=(active.start_tick - last_end_tick) / ticks_per_beat,
-                        modifier="rest",
-                    )
-                )
-            events.append(
-                midi_pitch_to_event(
-                    active.pitch,
-                    duration_ticks / ticks_per_beat,
-                )
+            active[key] = (absolute_tick, message.velocity)
+            if len(active) > 1:
+                polyphony_detected = True
+            continue
+
+        if not _is_note_end(message):
+            continue
+        key = (message.note, message.channel)
+        try:
+            start_tick, velocity = active.pop(key)
+        except KeyError as error:
+            raise MidiImportError(
+                f"tick {absolute_tick} 的 {_pitch_name(message.note)} "
+                "缺少对应的开始事件"
+            ) from error
+        if absolute_tick <= start_tick:
+            raise MidiImportError(
+                f"MIDI 音符 {_pitch_name(message.note)} 的持续时间必须大于零"
             )
-            last_end_tick = tick
-            active = None
-
-        for message in starting:
-            if active is not None:
-                raise MidiImportError("首版 MIDI 导入只支持一次演奏一个音符，不支持和弦")
-            active = _ActiveNote(
+        notes.append(
+            _MidiNote(
+                start_tick=start_tick,
+                end_tick=absolute_tick,
                 pitch=message.note,
                 channel=message.channel,
-                start_tick=tick,
+                velocity=velocity,
             )
-
-    if active is not None:
-        raise MidiImportError(
-            f"MIDI 音符 {_pitch_name(active.pitch)} 缺少对应的结束事件"
         )
-    if not events:
+
+    if active:
+        (pitch, _channel), (_start_tick, _velocity) = min(
+            active.items(), key=lambda item: item[1]
+        )
+        raise MidiImportError(
+            f"MIDI 音符 {_pitch_name(pitch)} 缺少对应的结束事件"
+        )
+    if not notes:
         raise MidiImportError("所选 MIDI 轨道中没有可转换的完整音符")
-    return tuple(events)
+    notes.sort(key=lambda note: (note.start_tick, -note.pitch, note.end_tick))
+    return tuple(notes), polyphony_detected
+
+
+def _cluster_note_onsets(
+    notes: tuple[_MidiNote, ...], ticks_per_beat: int
+) -> tuple[tuple[_MidiNote, ...], ...]:
+    tolerance_ticks = max(1, round(ticks_per_beat * _ONSET_CLUSTER_BEATS))
+    clusters: list[list[_MidiNote]] = []
+    for note in notes:
+        if (
+            not clusters
+            or note.start_tick - clusters[-1][0].start_tick > tolerance_ticks
+        ):
+            clusters.append([note])
+        else:
+            clusters[-1].append(note)
+    return tuple(tuple(cluster) for cluster in clusters)
+
+
+def _space_note_onsets(
+    clusters: tuple[tuple[_MidiNote, ...], ...], minimum_interval_ticks: int
+) -> tuple[tuple[tuple[_MidiNote, ...], ...], bool]:
+    """Keep the first onset in each minimum interval for stable game input."""
+
+    kept: list[tuple[_MidiNote, ...]] = []
+    last_kept_start: int | None = None
+    adjustment_detected = False
+    for cluster in clusters:
+        start_tick = cluster[0].start_tick
+        if (
+            last_kept_start is not None
+            and start_tick - last_kept_start < minimum_interval_ticks
+        ):
+            adjustment_detected = True
+            continue
+        kept.append(cluster)
+        last_kept_start = start_tick
+    return tuple(kept), adjustment_detected
+
+
+def _seconds_to_ticks(
+    seconds: float, ticks_per_beat: int, tempo: int
+) -> int:
+    ticks = seconds * 1_000_000 * ticks_per_beat / tempo
+    return max(1, ceil(ticks))
+
+
+def _nearest_playable_pitch(
+    pitch: int, mapping: dict[int, tuple[str, str]]
+) -> tuple[int, bool]:
+    if pitch in mapping:
+        return pitch, False
+
+    same_pitch_class = [
+        playable_pitch
+        for playable_pitch in mapping
+        if playable_pitch % 12 == pitch % 12
+    ]
+    nearest = min(
+        same_pitch_class,
+        key=lambda playable_pitch: abs(playable_pitch - pitch),
+    )
+    return nearest, True
+
+
+def _raise_low_polyphonic_pitch(pitch: int) -> tuple[int, bool]:
+    if pitch >= _POLYPHONIC_MELODY_FLOOR:
+        return pitch, False
+    while pitch < _POLYPHONIC_MELODY_FLOOR:
+        pitch += 12
+    return pitch, True
 
 
 def _pitch_mapping() -> dict[int, tuple[str, str]]:

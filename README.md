@@ -1,6 +1,6 @@
 # 三角洲口琴自动演奏器（学习项目）
 
-这是一个用 Python 编写的口琴曲谱播放器。当前版本是 v0.9.0，加入了可视化桌面界面，可以直接选择曲目、查看信息、导入曲谱或 MIDI、设置热键并控制播放；原有命令行功能仍然保留。
+这是一个用 Python 编写的口琴曲谱播放器。当前正在开发 v1.0，已有可视化桌面界面，可以直接选择曲目、查看信息、导入曲谱或 MIDI、设置热键并控制播放；原有命令行功能仍然保留。
 
 > 默认模式不会发送真实输入。只有使用 `--real-input` 才会向当前前台窗口发送 Windows 键鼠事件。游戏对第三方自动化程序可能有处罚，请在用于游戏前确认当时有效的官方规则并自行评估账号风险。本项目不会读取、修改或注入游戏进程，也不会实现反作弊绕过。
 
@@ -67,7 +67,7 @@ python -m pip install -e .
 
 ### 桌面界面（推荐）
 
-启动 v0.9 桌面界面：
+启动桌面界面：
 
 ```powershell
 python -X utf8 -m harmonica_player --gui
@@ -115,7 +115,7 @@ python -X utf8 -m harmonica_player --import-song examples/user_song_template.txt
 
 上面的命令使用项目附带的导入示例；以后只需将路径换成自己的曲谱文件。
 
-导入成功后，曲谱会以 `.song` 文件保存在项目的 `songs` 文件夹中，并可以通过文件名或中文标题选择：
+导入成功后，曲谱会以 `.song` 文件保存在当前 Windows 用户的 `%LOCALAPPDATA%\DeltaHarmonicaPlayer\songs` 文件夹中，并可以通过文件名或中文标题选择。首次运行 v1.0 时，程序也会自动复制旧版项目 `songs` 文件夹中的曲谱，且不会覆盖同名文件：
 
 ```powershell
 python -X utf8 -m harmonica_player --song "我的曲子"
@@ -150,7 +150,7 @@ python -X utf8 -m harmonica_player --song generated_midi_scale
 python -X utf8 -m harmonica_player --import-midi "D:\Music\multi-track.mid" --midi-track 1
 ```
 
-默认音高映射以 MIDI 中央 C（编号 60）作为 `1 normal`：低一个八度使用 `down`，高一个八度使用 `up`，中央八度的升半音使用 `semitone`。首版只支持恒定 BPM、一次演奏一个音符的单旋律，不支持和弦、播放中变速、延音踏板或音域外音符；遇到这些情况会停止导入并说明原因，不会生成不可靠的曲谱。
+默认音高映射以 MIDI 中央 C（编号 60）作为 `1 normal`：低一个八度使用 `down`，高一个八度使用 `up`，中央八度的升半音使用 `semitone`。当所选轨道中出现和弦或重叠音符时，相近起奏的音符会合并成一组并保留每组最高音；下一组开始时会结束上一音，避免钢琴延音遮住后续节奏。对于多声部 MIDI，低于 G3 的选中音会保持音名并上移八度，以减少低声部伴奏对主旋律的干扰；单旋律 MIDI 不使用这项优化。其他无法直接演奏的音符会保持音名，并移动到最近的可演奏八度。为了让游戏稳定识别输入，导入时相邻音符的起奏至少间隔 0.10 秒，过密音符会保留先出现的一个；连续音符之间还会预留约 0.02 秒松键空隙。这些处理不会拉长曲子的整体时间。程序会在生成曲谱和导入结果中说明这些有损转换。当前仍不支持播放中改变 BPM 或延音踏板。
 
 MIDI 解析使用 [Mido](https://mido.readthedocs.io/en/stable/)，项目只需要它的文件读取能力，不需要实时 MIDI 端口后端。
 

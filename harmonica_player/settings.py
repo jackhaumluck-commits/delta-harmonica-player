@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from .hotkeys import HotkeyBindings
+from .runtime_paths import user_data_directory
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,9 +47,7 @@ class GuiSettings:
 def default_settings_path() -> Path:
     """Return a per-user path instead of storing preferences in the repository."""
 
-    local_app_data = os.environ.get("LOCALAPPDATA")
-    root = Path(local_app_data) if local_app_data else Path.home() / ".config"
-    return root / "DeltaHarmonicaPlayer" / "settings.json"
+    return user_data_directory() / "settings.json"
 
 
 def load_gui_settings(path: Path | None = None) -> GuiSettings:

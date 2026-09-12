@@ -46,6 +46,10 @@ class MidiImportTests(unittest.TestCase):
             self.assertEqual(conversion.song.title, "练习曲")
             self.assertEqual(conversion.track_index, 0)
             self.assertEqual(conversion.track_name, "Melody")
+            self.assertFalse(conversion.polyphony_detected)
+            self.assertFalse(conversion.octave_folding_detected)
+            self.assertFalse(conversion.low_register_adjustment_detected)
+            self.assertTrue(conversion.timing_adjustment_detected)
             self.assertEqual(
                 [
                     (event.note, event.beats, event.modifier)
@@ -53,14 +57,27 @@ class MidiImportTests(unittest.TestCase):
                 ],
                 [
                     ("0", 0.5, "rest"),
-                    ("1", 1.0, "down"),
-                    ("1", 0.5, "normal"),
-                    ("1", 0.5, "semitone"),
+                    ("1", 29 / 30, "down"),
+                    ("0", 1 / 30, "rest"),
+                    ("1", 7 / 15, "normal"),
+                    ("0", 1 / 30, "rest"),
+                    ("1", 7 / 15, "semitone"),
+                    ("0", 1 / 30, "rest"),
                     ("8", 1.0, "up"),
                 ],
             )
             reparsed = parse_song(format_midi_song(conversion))
-            self.assertEqual(reparsed, conversion.song)
+            self.assertEqual(reparsed.bpm, conversion.song.bpm)
+            self.assertEqual(reparsed.title, conversion.song.title)
+            self.assertEqual(len(reparsed.events), len(conversion.song.events))
+            for reparsed_event, original_event in zip(
+                reparsed.events, conversion.song.events
+            ):
+                self.assertEqual(reparsed_event.note, original_event.note)
+                self.assertEqual(reparsed_event.modifier, original_event.modifier)
+                self.assertAlmostEqual(
+                    reparsed_event.beats, original_event.beats, places=5
+                )
 
     def test_imports_generated_score_into_user_library(self) -> None:
         with TemporaryDirectory() as temporary_directory:
@@ -138,7 +155,7 @@ class MidiImportTests(unittest.TestCase):
             with self.assertRaisesRegex(MidiImportError, "没有音符"):
                 convert_midi(path, track_index=0)
 
-    def test_rejects_chords(self) -> None:
+    def test_extracts_highest_note_from_chords(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             path = Path(temporary_directory) / "chord.mid"
             midi = MidiFile(ticks_per_beat=480)
@@ -153,8 +170,175 @@ class MidiImportTests(unittest.TestCase):
             midi.tracks.append(track)
             midi.save(path)
 
-            with self.assertRaisesRegex(MidiImportError, "不支持和弦"):
-                convert_midi(path)
+            conversion = convert_midi(path)
+
+            self.assertTrue(conversion.polyphony_detected)
+            self.assertEqual(
+                conversion.song.events,
+                (NoteEvent("3", 1.0, "normal"),),
+            )
+            self.assertIn("和弦处理", format_midi_song(conversion))
+
+    def test_raises_very_low_notes_only_for_polyphonic_midi(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            path = Path(temporary_directory) / "low_chord.mid"
+            midi = MidiFile(ticks_per_beat=480)
+            track = MidiTrack(
+                [
+                    Message("note_on", note=41, velocity=64, time=0),
+                    Message("note_on", note=48, velocity=64, time=0),
+                    Message("note_off", note=41, velocity=0, time=480),
+                    Message("note_off", note=48, velocity=0, time=0),
+                ]
+            )
+            midi.tracks.append(track)
+            midi.save(path)
+
+            conversion = convert_midi(path)
+
+            self.assertTrue(conversion.low_register_adjustment_detected)
+            self.assertEqual(
+                conversion.song.events,
+                (NoteEvent("1", 1.0, "normal"),),
+            )
+            self.assertIn("旋律优化", format_midi_song(conversion))
+
+    def test_limits_dense_notes_and_preserves_the_timeline(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            path = Path(temporary_directory) / "dense.mid"
+            midi = MidiFile(ticks_per_beat=480)
+            track = MidiTrack(
+                [
+                    Message("note_on", note=60, velocity=64, time=0),
+                    Message("note_off", note=60, velocity=0, time=30),
+                    Message("note_on", note=62, velocity=64, time=18),
+                    Message("note_off", note=62, velocity=0, time=30),
+                    Message("note_on", note=64, velocity=64, time=66),
+                    Message("note_off", note=64, velocity=0, time=96),
+                ]
+            )
+            midi.tracks.append(track)
+            midi.save(path)
+
+            conversion = convert_midi(path)
+
+            self.assertTrue(conversion.timing_adjustment_detected)
+            self.assertEqual(
+                conversion.song.events,
+                (
+                    NoteEvent("1", 76 / 480, "normal"),
+                    NoteEvent("0", 68 / 480, "rest"),
+                    NoteEvent("3", 96 / 480, "normal"),
+                ),
+            )
+            self.assertAlmostEqual(conversion.song.duration_seconds, 0.25)
+            self.assertIn("相邻音至少间隔 0.10 秒", format_midi_song(conversion))
+
+    def test_new_onset_replaces_held_note_and_preserves_timeline(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            path = Path(temporary_directory) / "overlap.mid"
+            midi = MidiFile(ticks_per_beat=480)
+            track = MidiTrack(
+                [
+                    Message("note_on", note=60, velocity=64, time=0),
+                    Message("note_on", note=67, velocity=64, time=240),
+                    Message("note_off", note=67, velocity=0, time=240),
+                    Message("note_off", note=60, velocity=0, time=240),
+                ]
+            )
+            midi.tracks.append(track)
+            midi.save(path)
+
+            conversion = convert_midi(path)
+
+            self.assertTrue(conversion.polyphony_detected)
+            self.assertEqual(
+                conversion.song.events,
+                (
+                    NoteEvent("1", 11 / 24, "normal"),
+                    NoteEvent("0", 1 / 24, "rest"),
+                    NoteEvent("5", 0.5, "normal"),
+                    NoteEvent("0", 0.5, "rest"),
+                ),
+            )
+
+    def test_keeps_repeated_notes_as_separate_events(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            path = Path(temporary_directory) / "repeated.mid"
+            midi = MidiFile(ticks_per_beat=480)
+            track = MidiTrack(
+                [
+                    Message("note_on", note=60, velocity=64, time=0),
+                    Message("note_off", note=60, velocity=0, time=480),
+                    Message("note_on", note=60, velocity=64, time=0),
+                    Message("note_off", note=60, velocity=0, time=480),
+                ]
+            )
+            midi.tracks.append(track)
+            midi.save(path)
+
+            conversion = convert_midi(path)
+
+            self.assertFalse(conversion.polyphony_detected)
+            self.assertEqual(
+                conversion.song.events,
+                (
+                    NoteEvent("1", 23 / 24, "normal"),
+                    NoteEvent("0", 1 / 24, "rest"),
+                    NoteEvent("1", 1.0, "normal"),
+                ),
+            )
+
+    def test_new_onset_prevents_held_note_from_masking_rhythm(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            path = Path(temporary_directory) / "held_high.mid"
+            midi = MidiFile(ticks_per_beat=480)
+            track = MidiTrack(
+                [
+                    Message("note_on", note=67, velocity=64, time=0),
+                    Message("note_on", note=60, velocity=64, time=240),
+                    Message("note_off", note=60, velocity=0, time=240),
+                    Message("note_off", note=67, velocity=0, time=240),
+                ]
+            )
+            midi.tracks.append(track)
+            midi.save(path)
+
+            conversion = convert_midi(path)
+
+            self.assertEqual(
+                conversion.song.events,
+                (
+                    NoteEvent("5", 11 / 24, "normal"),
+                    NoteEvent("0", 1 / 24, "rest"),
+                    NoteEvent("1", 0.5, "normal"),
+                    NoteEvent("0", 0.5, "rest"),
+                ),
+            )
+
+    def test_clusters_slightly_rolled_chord_into_one_onset(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            path = Path(temporary_directory) / "rolled_chord.mid"
+            midi = MidiFile(ticks_per_beat=480)
+            track = MidiTrack(
+                [
+                    Message("note_on", note=60, velocity=64, time=0),
+                    Message("note_on", note=64, velocity=64, time=8),
+                    Message("note_on", note=67, velocity=64, time=8),
+                    Message("note_off", note=60, velocity=0, time=464),
+                    Message("note_off", note=64, velocity=0, time=0),
+                    Message("note_off", note=67, velocity=0, time=0),
+                ]
+            )
+            midi.tracks.append(track)
+            midi.save(path)
+
+            conversion = convert_midi(path)
+
+            self.assertEqual(
+                conversion.song.events,
+                (NoteEvent("5", 1.0, "normal"),),
+            )
 
     def test_rejects_tempo_changes_during_playback(self) -> None:
         with TemporaryDirectory() as temporary_directory:
@@ -174,16 +358,26 @@ class MidiImportTests(unittest.TestCase):
             with self.assertRaisesRegex(MidiImportError, "改变 BPM"):
                 convert_midi(path)
 
-    def test_rejects_unplayable_pitch_and_unfinished_note(self) -> None:
+    def test_folds_unplayable_pitch_into_nearest_octave(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
             unplayable = root / "unplayable.mid"
-            unfinished = root / "unfinished.mid"
             self._save_notes(unplayable, [(49, 480)])
+
+            conversion = convert_midi(unplayable)
+
+            self.assertTrue(conversion.octave_folding_detected)
+            self.assertEqual(
+                conversion.song.events,
+                (NoteEvent("1", 1.0, "semitone"),),
+            )
+            self.assertIn("音域处理", format_midi_song(conversion))
+
+    def test_rejects_unfinished_note(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            unfinished = Path(temporary_directory) / "unfinished.mid"
             self._save_notes(unfinished, [(60, None)])
 
-            with self.assertRaisesRegex(MidiImportError, "C#3"):
-                convert_midi(unplayable)
             with self.assertRaisesRegex(MidiImportError, "缺少对应的结束事件"):
                 convert_midi(unfinished)
 
@@ -194,6 +388,14 @@ class MidiImportTests(unittest.TestCase):
         )
         self.assertEqual(midi_pitch_to_event(72, 1).modifier, "normal")
         self.assertEqual(midi_pitch_to_event(84, 1).modifier, "up")
+        self.assertEqual(
+            midi_pitch_to_event(49, 1),
+            NoteEvent("1", 1, "semitone"),
+        )
+        self.assertEqual(
+            midi_pitch_to_event(96, 1),
+            NoteEvent("8", 1, "up"),
+        )
 
     @staticmethod
     def _save_notes(path: Path, notes: list[tuple[int, int | None]]) -> None:

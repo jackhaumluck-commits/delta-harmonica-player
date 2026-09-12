@@ -23,7 +23,7 @@ def main() -> int:
     parser.add_argument(
         "--gui",
         action="store_true",
-        help="打开 v0.9 桌面界面",
+        help="打开桌面界面",
     )
     parser.add_argument(
         "--song",
@@ -174,19 +174,27 @@ def main() -> int:
             or args.real_input
         ):
             parser.error("--import-midi 不能和曲谱或播放选项同时使用")
-        from .midi_import import MidiImportError, import_midi
+        from .midi_import import MidiImportError, import_midi_with_details
 
         try:
-            imported = import_midi(
+            result = import_midi_with_details(
                 args.import_midi,
                 track_index=args.midi_track,
             )
         except (OSError, SongFormatError, SongImportError, MidiImportError) as error:
             parser.error(f"无法导入 MIDI：{error}")
         print(
-            f"已将 MIDI 转换为用户曲目：{imported.display_name} "
-            f"({imported.path.name})"
+            f"已将 MIDI 转换为用户曲目：{result.summary.display_name} "
+            f"({result.summary.path.name})"
         )
+        if result.conversion.polyphony_detected:
+            print("检测到和弦：已按相近起奏时间分组并保留每组最高音。")
+        if result.conversion.octave_folding_detected:
+            print("检测到音域外音符：已移动到最近的可演奏八度。")
+        if result.conversion.low_register_adjustment_detected:
+            print("旋律优化：已将多声部中的部分过低伴奏音上移八度。")
+        if result.conversion.timing_adjustment_detected:
+            print("输入优化：相邻音至少间隔 0.10 秒，并预留 0.02 秒松键空隙。")
         return 0
 
     if args.list_songs:

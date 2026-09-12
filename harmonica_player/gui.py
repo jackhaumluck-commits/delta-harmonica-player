@@ -13,9 +13,14 @@ from pathlib import Path
 from threading import Event, Thread
 from typing import Any, Callable
 
+from . import __version__
 from .hotkeys import Hotkey, HotkeyBindings, WindowsHotkeyListener
 from .library import SongSummary, import_song, list_songs
-from .midi_import import MidiImportError, import_midi, list_midi_tracks
+from .midi_import import (
+    MidiImportError,
+    import_midi_with_details,
+    list_midi_tracks,
+)
 from .playback import (
     PauseToggleResult,
     PlaybackOutput,
@@ -54,7 +59,10 @@ _TUTORIAL_SECTIONS = (
     (
         "2. 导入 MIDI",
         "点击“导入 MIDI”，选择 .mid 或 .midi 文件。"
-        "如果文件包含多个可演奏轨道，程序会请你选择其中一个。",
+        "如果文件包含多个可演奏轨道，程序会请你选择其中一个；"
+        "相近起奏的和弦音会合并成一组并保留每组最高音，"
+        "过低的伴奏音和音域外音符会移动到更合适的八度。"
+        "过密音符会自动精简，并为按键松开留出短暂空隙。",
     ),
     (
         "3. 选择模式并开始",
@@ -364,7 +372,10 @@ class HarmonicaPlayerApp:
         tk = self._tk
         self._configure_styles()
 
-        root.title("口琴自动演奏器 v0.9")
+        version_label = f"v{__version__.split('.dev', 1)[0]}"
+        if ".dev" in __version__:
+            version_label += " 开发版"
+        root.title(f"口琴自动演奏器 {version_label}")
         root.geometry("1180x840")
         root.minsize(1000, 740)
         root.configure(background=_COLORS["background"])
@@ -393,7 +404,7 @@ class HarmonicaPlayerApp:
         status_area.pack(side="right")
         tk.Label(
             status_area,
-            text="v0.9",
+            text=version_label,
             background=_COLORS["surface_high"],
             foreground=_COLORS["muted"],
             padx=10,
@@ -830,14 +841,34 @@ class HarmonicaPlayerApp:
                 if selected not in valid_indexes:
                     raise MidiImportError(f"MIDI 轨道 {selected} 中没有音符")
                 track_index = selected
-            imported = import_midi(path, track_index=track_index)
+            result = import_midi_with_details(path, track_index=track_index)
         except Exception as error:
             self._messagebox.showerror(
                 "MIDI 导入失败", str(error), parent=self._root
             )
             self._append_log(f"MIDI 导入失败：{error}")
             return
-        self._finish_import(imported)
+        details: list[str] = []
+        if result.conversion.polyphony_detected:
+            details.append(
+                "检测到和弦，已按相近起奏时间分组并保留每组最高音。"
+            )
+        if result.conversion.octave_folding_detected:
+            details.append(
+                "检测到音域外音符，已按音名移动到最近的可演奏八度。"
+            )
+        if result.conversion.low_register_adjustment_detected:
+            details.append(
+                "已将多声部中的部分过低伴奏音上移八度，以突出主旋律。"
+            )
+        if result.conversion.timing_adjustment_detected:
+            details.append(
+                "已限制相邻音至少间隔 0.10 秒，并预留 0.02 秒松键空隙。"
+            )
+        self._finish_import(
+            result.summary,
+            detail="\n".join(details) if details else None,
+        )
 
     def _show_tutorial(self) -> None:
         """Open a concise guide for importing songs and starting playback."""
@@ -922,12 +953,18 @@ class HarmonicaPlayerApp:
         window.grab_set()
         window.focus_force()
 
-    def _finish_import(self, imported: SongSummary) -> None:
+    def _finish_import(
+        self, imported: SongSummary, *, detail: str | None = None
+    ) -> None:
         self._refresh_songs(imported.path)
         self._append_log(f"已导入：{imported.display_name}")
+        message = f"已加入用户曲库：{imported.display_name}"
+        if detail is not None:
+            self._append_log(detail)
+            message += f"\n\n{detail}"
         self._messagebox.showinfo(
             "导入成功",
-            f"已加入用户曲库：{imported.display_name}",
+            message,
             parent=self._root,
         )
 

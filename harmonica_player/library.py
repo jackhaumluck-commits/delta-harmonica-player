@@ -5,13 +5,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from shutil import copy2
 
+from .runtime_paths import (
+    bundled_song_directory,
+    legacy_user_song_directory,
+    user_song_directory,
+)
 from .song import Song, SongFormatError, load_song, parse_song
 
 
-PROJECT_DIRECTORY = Path(__file__).resolve().parent.parent
-DEFAULT_SONG_DIRECTORY = PROJECT_DIRECTORY / "examples"
-DEFAULT_USER_SONG_DIRECTORY = PROJECT_DIRECTORY / "songs"
+DEFAULT_SONG_DIRECTORY = bundled_song_directory()
+DEFAULT_USER_SONG_DIRECTORY = user_song_directory()
+LEGACY_USER_SONG_DIRECTORY = legacy_user_song_directory()
+LEGACY_MIGRATION_MARKER = ".legacy-library-migrated"
 SUPPORTED_IMPORT_SUFFIXES = {".song", ".txt"}
 
 
@@ -51,6 +58,8 @@ def list_songs(
 
     summaries = list(_list_directory(bundled_directory, SongSource.BUNDLED))
     if user_directory is not None and user_directory != bundled_directory:
+        if user_directory == DEFAULT_USER_SONG_DIRECTORY:
+            migrate_legacy_user_songs()
         summaries.extend(_list_directory(user_directory, SongSource.USER))
     summaries.sort(key=lambda song: (song.name.casefold(), song.source.value))
     return tuple(summaries)
@@ -137,6 +146,35 @@ def save_user_song(
     user_directory.mkdir(parents=True, exist_ok=True)
     destination.write_text(text, encoding="utf-8", newline="\n")
     return _summarize(destination, song, SongSource.USER)
+
+
+def migrate_legacy_user_songs(
+    legacy_directory: Path = LEGACY_USER_SONG_DIRECTORY,
+    user_directory: Path = DEFAULT_USER_SONG_DIRECTORY,
+) -> tuple[Path, ...]:
+    """Copy pre-v1.0 user scores once without replacing newer files."""
+
+    marker = user_directory / LEGACY_MIGRATION_MARKER
+    if marker.exists():
+        return ()
+    if legacy_directory == user_directory or not legacy_directory.exists():
+        return ()
+
+    source_paths = sorted(legacy_directory.glob("*.song"))
+    if not source_paths:
+        return ()
+
+    migrated: list[Path] = []
+    for source_path in source_paths:
+        destination = user_directory / source_path.name
+        if destination.exists():
+            continue
+        user_directory.mkdir(parents=True, exist_ok=True)
+        copy2(source_path, destination)
+        migrated.append(destination)
+    user_directory.mkdir(parents=True, exist_ok=True)
+    marker.write_text("v1.0\n", encoding="utf-8")
+    return tuple(migrated)
 
 
 def _list_directory(
